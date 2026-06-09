@@ -1,0 +1,230 @@
+const express = require('express');
+const cors = require('cors');
+const path = require('path');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+// ===== IN-MEMORY DATABASE =====
+const rooms = {
+    101: { devices: 3, limit: 3, connectedMACs: ['aa:bb:cc:dd:ee:f1', 'aa:bb:cc:dd:ee:f2', 'aa:bb:cc:dd:ee:f3'] },
+    102: { devices: 2, limit: 3, connectedMACs: ['aa:bb:cc:dd:ee:f4', 'aa:bb:cc:dd:ee:f5'] },
+    103: { devices: 1, limit: 2, connectedMACs: ['aa:bb:cc:dd:ee:f6'] }
+};
+
+const pendingRequests = [];
+
+// ===== HELPER FUNCTIONS =====
+function calculateBandwidth(room) {
+    const usage = (room.devices / room.limit) * 100;
+    if (usage === 0) return 'Idle';
+    if (usage >= 100) return 'Con/ling';
+    return `${Math.round(usage)}%`;
+}
+
+function getTimeAgo(timestamp) {
+    const now = new Date();
+    const then = new Date(timestamp);
+    const diffMs = now - then;
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 1) return 'Just now';
+    if (diffMins === 1) return '1 minute ago';
+    if (diffMins < 60) return `${diffMins} minutes ago`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours === 1) return '1 hour ago';
+    return `${diffHours} hours ago`;
+}
+
+function sendWhatsAppNotification(phoneNumber, status, roomId) {
+    const message = status === 'approved'
+        ? ` Your request for additional device connection in Room ${roomId} has been APPROVED. You may now connect your device.`
+        : ` Your request for additional device connection in Room ${roomId} has been REJECTED. Please contact the front desk for assistance.`;
+    console.log(`[WHATSAPP] Sending to ${phoneNumber}: ${message}`);
+}
+
+// ===== API ROUTES =====
+
+// ===== HOTEL ROOM LOGIN =====
+const roomPasswords = {
+    "101": "room101",
+    "102": "room102",
+    "103": "room103"
+};
+
+app.post('/login', (req, res) => {
+
+    const { room, password } = req.body;
+
+    console.log(
+        `[LOGIN ATTEMPT] Room ${room}`
+    );
+
+    // room tak wujud
+    if (!roomPasswords[room]) {
+
+        return res.json({
+            success: false,
+            message: "Room not found"
+        });
+    }
+
+    // password salah
+    if (
+        roomPasswords[room]
+        !== password
+    ) {
+
+        return res.json({
+            success: false,
+            message:
+            "Wrong password"
+        });
+    }
+
+    console.log(
+        `[LOGIN SUCCESS] Room ${room}`
+    );
+
+    return res.json({
+        success: true,
+        room
+    });
+
+});
+
+// 1. Check device limit
+app.post('/api/check-device-limit', (req, res) => {
+    const { room, mac } = req.body;
+    console.log(`[CHECK] Room ${room} - MAC ${mac}`);
+
+    if (!rooms[room]) {
+        return res.status(404).json({ allowed: false, error: 'Room not found' });
+    }
+
+    const roomData = rooms[room];
+
+    if (roomData.connectedMACs.includes(mac)) {
+        return res.json({ allowed: true, alreadyConnected: true, message: 'Device already authorized' });
+    }
+
+    if (roomData.devices < roomData.limit) {
+        roomData.devices++;
+        roomData.connectedMACs.push(mac);
+        console.log(`[ALLOWED] Room ${room} - ${roomData.devices}/${roomData.limit}`);
+        return res.json({ allowed: true, currentDevices: roomData.devices, limit: roomData.limit });
+    } else {
+        console.log(`[BLOCKED] Room ${room} - Limit exceeded`);
+        return res.json({ allowed: false, currentDevices: roomData.devices, limit: roomData.limit });
+    }
+});
+
+// 2. Submit device request
+app.post('/api/request-device', (req, res) => {
+    const { room, phoneNumber, mac } = req.body;
+
+    if (!room || !phoneNumber) {
+        return res.status(400).json({ error: 'Room and phone number required' });
+    }
+
+    const request = {
+        id: Date.now(),
+        room,
+        phoneNumber,
+        mac: mac || 'unknown',
+        timestamp: new Date().toISOString(),
+        status: 'pending'
+    };
+
+    pendingRequests.push(request);
+    console.log(`[REQUEST] New request from ${phoneNumber} for Room ${room}`);
+
+    res.json({ success: true, requestId: request.id, message: 'Request submitted' });
+});
+
+// 3. Get pending requests
+app.get('/api/pending-requests', (req, res) => {
+    const pending = pendingRequests.filter(r => r.status === 'pending');
+    res.json({
+        requests: pending.map(r => ({
+            id: r.id,
+            roomId: parseInt(r.room),
+            phoneNumber: r.phoneNumber,
+            time: getTimeAgo(r.timestamp),
+            status: r.status
+        }))
+    });
+});
+
+// 4. Approve request
+app.post('/api/approve-request', (req, res) => {
+    const { requestId, roomId } = req.body;
+    const request = pendingRequests.find(r => r.id === requestId);
+
+    if (!request) return res.status(404).json({ error: 'Request not found' });
+
+    const roomData = rooms[roomId];
+    if (!roomData) return res.status(404).json({ error: 'Room not found' });
+
+    roomData.limit++;
+    request.status = 'approved';
+
+    console.log(`[APPROVED] Request ${requestId} - Room ${roomId} limit: ${roomData.limit}`);
+    sendWhatsAppNotification(request.phoneNumber, 'approved', roomId);
+
+    res.json({ success: true, newLimit: roomData.limit });
+});
+
+// 5. Reject request
+app.post('/api/reject-request', (req, res) => {
+    const { requestId } = req.body;
+    const request = pendingRequests.find(r => r.id === requestId);
+
+    if (!request) return res.status(404).json({ error: 'Request not found' });
+
+    request.status = 'rejected';
+    console.log(`[REJECTED] Request ${requestId}`);
+    sendWhatsAppNotification(request.phoneNumber, 'rejected', request.room);
+
+    res.json({ success: true });
+});
+
+// 6. Get all rooms
+app.get('/api/rooms', (req, res) => {
+    const roomsArray = Object.keys(rooms).map(id => ({
+        id: parseInt(id),
+        devices: rooms[id].devices,
+        limit: rooms[id].limit,
+        bandwidth: calculateBandwidth(rooms[id]),
+        status: rooms[id].devices >= rooms[id].limit ? 'limit' : 'normal'
+    }));
+    res.json({ rooms: roomsArray });
+});
+
+// 7. Update room limit
+app.post('/api/update-limit', (req, res) => {
+    const { roomId, newLimit } = req.body;
+    if (!rooms[roomId]) return res.status(404).json({ error: 'Room not found' });
+    if (newLimit < 1) return res.status(400).json({ error: 'Limit must be at least 1' });
+
+    rooms[roomId].limit = newLimit;
+    console.log(`[UPDATE] Room ${roomId} limit: ${newLimit}`);
+
+    res.json({ success: true, roomId, newLimit });
+});
+
+// 8. Serve landing page for all non-API routes
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// ===== START SERVER =====
+app.listen(PORT, () => {
+    console.log(
+        'server running on port ${PORT}'
+    );
+});

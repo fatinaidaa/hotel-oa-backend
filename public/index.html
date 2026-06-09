@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hotel WiFi Login</title>
+
+<style>
+*{
+    margin:0;
+    padding:0;
+    box-sizing:border-box;
+}
+
+body{
+    font-family:Arial,sans-serif;
+    background:linear-gradient(135deg,#1e3c72 0%,#2a5298 100%);
+    min-height:100vh;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    padding:20px;
+}
+
+.container{
+    background:white;
+    width:100%;
+    max-width:450px;
+    border-radius:24px;
+    padding:45px;
+    box-shadow:0 20px 60px rgba(0,0,0,.3);
+}
+
+h1{
+    text-align:center;
+    color:#1a202c;
+    margin-bottom:10px;
+    font-size:34px;
+}
+
+.subtitle{
+    text-align:center;
+    color:#718096;
+    margin-bottom:30px;
+}
+
+.input-group{
+    margin-bottom:20px;
+}
+
+label{
+    display:block;
+    margin-bottom:8px;
+    color:#2d3748;
+    font-weight:600;
+}
+
+input{
+    width:100%;
+    padding:16px;
+    border:2px solid #e2e8f0;
+    border-radius:12px;
+    font-size:16px;
+}
+
+input:focus{
+    outline:none;
+    border-color:#2a5298;
+}
+
+.connect-btn{
+    width:100%;
+    background:linear-gradient(135deg,#1e3c72,#2a5298);
+    color:white;
+    border:none;
+    padding:18px;
+    border-radius:14px;
+    font-size:18px;
+    font-weight:700;
+    cursor:pointer;
+}
+
+.connect-btn:hover{
+    opacity:.95;
+}
+
+.status-msg{
+    margin-top:16px;
+    text-align:center;
+    padding:12px;
+    border-radius:10px;
+    display:none;
+}
+
+.error{
+    display:block;
+    background:#fff5f5;
+    color:#c53030;
+}
+
+.success{
+    display:block;
+    background:#f0fff4;
+    color:#276749;
+}
+
+.footer{
+    text-align:center;
+    margin-top:25px;
+    color:#a0aec0;
+    font-size:13px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>Hotel WiFi</h1>
+    <p class="subtitle">
+        Enter your room details to connect
+    </p>
+
+    <form id="wifiForm">
+
+        <div class="input-group">
+            <label>Room Number</label>
+            <input
+                type="text"
+                id="room"
+                placeholder="Example: 101"
+                required
+            >
+        </div>
+
+        <div class="input-group">
+            <label>Password</label>
+            <input
+                type="password"
+                id="password"
+                placeholder="Enter room password"
+                required
+            >
+        </div>
+
+        <button
+            type="submit"
+            class="connect-btn"
+            id="connectBtn">
+            Connect to WiFi
+        </button>
+
+    </form>
+
+    <div
+        class="status-msg"
+        id="statusMsg">
+    </div>
+
+    <div class="footer">
+        Need help? Contact the front desk
+    </div>
+
+</div>
+
+<script>
+
+document
+.getElementById("wifiForm")
+.addEventListener("submit",
+async function(e){
+
+    e.preventDefault();
+
+    const room =
+        document
+        .getElementById("room")
+        .value;
+
+    const password =
+        document
+        .getElementById("password")
+        .value;
+
+    const statusMsg =
+        document
+        .getElementById("statusMsg");
+
+    const btn =
+        document
+        .getElementById("connectBtn");
+
+    btn.disabled = true;
+    btn.innerText = "Checking...";
+
+    try{
+
+        const response =
+            await fetch(
+            "http://192.168.125.1:3000/login",
+            {
+                method:"POST",
+                headers:{
+                    "Content-Type":
+                    "application/json"
+                },
+                body:JSON.stringify({
+                    room,
+                    password
+                })
+            });
+
+        const data =
+            await response.json();
+
+        if(data.success){
+
+            statusMsg.className =
+            "status-msg success";
+
+            statusMsg.innerHTML =
+            "Login successful! Connecting...";
+
+            setTimeout(() => {
+
+                window.location.href =
+                "http://192.168.125.2:2050/redirect"
+
+            },1500);
+
+        }
+
+        else{
+
+            statusMsg.className =
+            "status-msg error";
+
+            statusMsg.innerHTML =
+            "Invalid room number or password";
+
+            btn.disabled = false;
+            btn.innerText =
+            "Connect to WiFi";
+        }
+
+    }
+
+    catch(error){
+
+        statusMsg.className =
+        "status-msg error";
+
+        statusMsg.innerHTML =
+        "Server connection failed";
+
+        btn.disabled = false;
+        btn.innerText =
+        "Connect to WiFi";
+    }
+
+});
+</script>
+
+</body>
+</html>
