@@ -3,7 +3,7 @@ const cors = require('cors');
 const path = require('path');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = 3000;
 
 // Middleware
 app.use(cors());
@@ -42,59 +42,57 @@ function getTimeAgo(timestamp) {
 
 function sendWhatsAppNotification(phoneNumber, status, roomId) {
     const message = status === 'approved'
-        ? ` Your request for additional device connection in Room ${roomId} has been APPROVED. You may now connect your device.`
-        : ` Your request for additional device connection in Room ${roomId} has been REJECTED. Please contact the front desk for assistance.`;
+        ? `✅ Your request for additional device connection in Room ${roomId} has been APPROVED. You may now connect your device.`
+        : `❌ Your request for additional device connection in Room ${roomId} has been REJECTED. Please contact the front desk for assistance.`;
     console.log(`[WHATSAPP] Sending to ${phoneNumber}: ${message}`);
 }
 
-// ===== API ROUTES =====
-
-// ===== HOTEL ROOM LOGIN =====
-const roomPasswords = {
-    "101": "room101",
-    "102": "room102",
-    "103": "room103"
+// ===== ROOM CREDENTIALS =====
+const roomCredentials = {
+    101: { password: 'room101', limit: 3 },
+    102: { password: 'room102', limit: 3 },
+    103: { password: 'room103', limit: 2 }
 };
 
-app.post('/login', (req, res) => {
+// ===== API ROUTES =====
 
+// 0. Login endpoint (called from ESP32)
+app.post('/api/login', (req, res) => {
     const { room, password } = req.body;
+    console.log(`[LOGIN] Room ${room}`);
 
-    console.log(
-        `[LOGIN ATTEMPT] Room ${room}`
-    );
+    const roomNum = parseInt(room);
+    const roomData = rooms[roomNum];
+    const credentials = roomCredentials[roomNum];
 
-    // room tak wujud
-    if (!roomPasswords[room]) {
+    if (!roomData || !credentials) {
+        return res.json({ success: false, message: 'Room not found' });
+    }
 
+    if (credentials.password !== password) {
+        return res.json({ success: false, message: 'Wrong password' });
+    }
+
+    // Check device limit
+    if (roomData.devices >= roomData.limit) {
         return res.json({
             success: false,
-            message: "Room not found"
+            limitExceeded: true,
+            message: 'Device limit exceeded'
         });
     }
 
-    // password salah
-    if (
-        roomPasswords[room]
-        !== password
-    ) {
-
-        return res.json({
-            success: false,
-            message:
-            "Wrong password"
-        });
-    }
-
-    console.log(
-        `[LOGIN SUCCESS] Room ${room}`
-    );
+    // Allow connection
+    roomData.devices++;
+    console.log(`[LOGIN SUCCESS] Room ${room} - ${roomData.devices}/${roomData.limit}`);
 
     return res.json({
         success: true,
-        room
+        message: 'Access granted',
+        room: room,
+        devicesConnected: roomData.devices,
+        limit: roomData.limit
     });
-
 });
 
 // 1. Check device limit
@@ -223,8 +221,16 @@ app.get('*', (req, res) => {
 });
 
 // ===== START SERVER =====
-app.listen(PORT, () => {
-    console.log(
-        'server running on port ${PORT}'
-    );
+app.listen(PORT, '0.0.0.0', () => {
+    console.log('\n🚀 Captive Portal Backend running!');
+    console.log(`📡 Local:   http://localhost:${PORT}`);
+    console.log(`📡 Network: http://192.168.1.100:${PORT}`);
+    console.log('\n✅ API Endpoints Ready:');
+    console.log('   POST /api/check-device-limit');
+    console.log('   POST /api/request-device');
+    console.log('   GET  /api/pending-requests');
+    console.log('   POST /api/approve-request');
+    console.log('   POST /api/reject-request');
+    console.log('   GET  /api/rooms');
+    console.log('   POST /api/update-limit\n');
 });
