@@ -2,8 +2,79 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 
+const mysql = require('mysql2');
+const bcrypt = require('bcryptjs');
+
 const app = express();
 const PORT = 3000;
+
+// ===== RAILWAY MYSQL =====
+const db = mysql.createConnection(
+    'mysql://root:bnZsDdWhZKPOTWDaLSWSVNfyeagsVRHx@acela.proxy.rlwy.net:46443/railway'
+);
+
+db.connect((err) => {
+
+    if (err) {
+
+        console.error(
+            '❌ Railway DB Failed:',
+            err
+        );
+
+        return;
+    }
+
+    console.log(
+        '✅ Railway MySQL Connected!'
+    );
+
+});
+
+db.connect((err) => {
+
+    if (err) {
+        console.error(
+            '❌ Railway DB Failed:',
+            err
+        );
+        return;
+    }
+
+    console.log(
+        '✅ Railway MySQL Connected!'
+    );
+
+});
+
+db.query(`
+CREATE TABLE IF NOT EXISTS staff_users (
+
+    id INT AUTO_INCREMENT PRIMARY KEY,
+
+    full_name VARCHAR(255),
+
+    staff_id VARCHAR(50) UNIQUE,
+
+    password VARCHAR(255),
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+
+)
+`, (err) => {
+
+    if (err) {
+        console.error(
+            '❌ Table creation failed:',
+            err
+        );
+        return;
+    }
+
+    console.log(
+        '✅ staff_users table ready!'
+    );
+});
 
 // Middleware
 app.use(cors());
@@ -215,9 +286,247 @@ app.post('/api/update-limit', (req, res) => {
     res.json({ success: true, roomId, newLimit });
 });
 
+// ===== STAFF SIGNUP =====
+app.post('/api/auth/signup', async (req, res) => {
+
+    try {
+
+        const {
+            fullName,
+            staffId,
+            password
+        } = req.body;
+
+        // check kosong
+        if (
+            !fullName ||
+            !staffId ||
+            !password
+        ) {
+
+            return res.status(400).json({
+                success: false,
+                message: 'Please fill all fields'
+            });
+
+        }
+
+        // check duplicate staff id
+        db.query(
+            'SELECT * FROM staff_users WHERE staff_id = ?',
+            [staffId],
+            async (err, results) => {
+
+                if (err) {
+
+                    console.error(err);
+
+                    return res.status(500).json({
+                        success: false
+                    });
+
+                }
+
+                if (results.length > 0) {
+
+                    return res.status(400).json({
+                        success: false,
+                        message:
+                        'Staff ID already exists'
+                    });
+
+                }
+
+                // hash password
+                const hashedPassword =
+                await bcrypt.hash(
+                    password,
+                    10
+                );
+
+                // insert user
+                db.query(
+
+                    `INSERT INTO staff_users
+                    (full_name, staff_id, password)
+                    VALUES (?, ?, ?)`,
+
+                    [
+                        fullName,
+                        staffId,
+                        hashedPassword
+                    ],
+
+                    (err) => {
+
+                        if (err) {
+
+                            console.error(err);
+
+                            return res.status(500).json({
+                                success: false
+                            });
+
+                        }
+
+                        res.json({
+                            success: true,
+                            message:
+                            'Signup successful'
+                        });
+
+                    }
+
+                );
+
+            }
+
+        );
+
+    } catch (error) {
+
+        console.error(error);
+
+        res.status(500).json({
+            success: false
+        });
+
+    }
+
+});
+
+// ===== STAFF LOGIN =====
+app.post('/api/auth/login', (req, res) => {
+
+    const {
+        staffId,
+        password
+    } = req.body;
+
+    console.log(
+        'Login request:',
+        staffId
+    );
+
+    if (
+        !staffId ||
+        !password
+    ) {
+
+        return res.status(400).json({
+            success: false,
+            message:
+            'Please fill all fields'
+        });
+
+    }
+
+    db.query(
+
+        'SELECT * FROM staff_users WHERE staff_id = ?',
+
+        [staffId],
+
+        async (
+            err,
+            results
+        ) => {
+
+            if (err) {
+
+                console.error(err);
+
+                return res.status(500).json({
+                    success: false,
+                    message:
+                    'Database error'
+                });
+
+            }
+
+            if (
+                results.length === 0
+            ) {
+
+                return res.status(404).json({
+                    success: false,
+                    message:
+                    'Staff not found'
+                });
+
+            }
+
+            const user =
+            results[0];
+
+            const isMatch =
+            await bcrypt.compare(
+                password,
+                user.password
+            );
+
+            if (!isMatch) {
+
+                return res.status(401).json({
+                    success: false,
+                    message:
+                    'Wrong password'
+                });
+
+            }
+
+            return res.json({
+
+                success: true,
+
+                token:
+                'dummy-token',
+
+                user: {
+
+                    id:
+                    user.id,
+
+                    fullName:
+                    user.full_name,
+
+                    staffId:
+                    user.staff_id
+
+                }
+
+            });
+
+        }
+
+    );
+
+});
+
+
 // 8. Serve landing page for all non-API routes
 app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+
+    // jangan kacau API routes
+    if (req.path.startsWith('/api')) {
+
+        return res
+        .status(404)
+        .json({
+            error:
+            'API route not found'
+        });
+
+    }
+
+    res.sendFile(
+        path.join(
+            __dirname,
+            'public',
+            'index.html'
+        )
+    );
+
 });
 
 // ===== START SERVER =====
