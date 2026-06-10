@@ -274,6 +274,74 @@ app.get('/api/rooms', (req, res) => {
     res.json({ rooms: roomsArray });
 });
 
+// ===== DASHBOARD ROUTES =====
+
+// Sessions / Connected Users
+app.get('/api/sessions/active', (req, res) => {
+    res.json([
+        {
+            mac: 'AA:BB:CC:11',
+            room: 101,
+            device: 'iPhone 14',
+            status: 'connected'
+        },
+        {
+            mac: 'AA:BB:CC:22',
+            room: 102,
+            device: 'Samsung A54',
+            status: 'connected'
+        }
+    ]);
+});
+
+
+// Requests
+app.get('/api/requests', (req, res) => {
+
+    const pending =
+        pendingRequests.filter(
+            r => r.status === 'pending'
+        );
+
+    res.json(pending);
+});
+
+
+// Nodes
+app.get('/api/nodes', (req, res) => {
+    res.json([
+        {
+            id: 1,
+            nodeId: 'ESP32-001',
+            ip: '192.168.1.10',
+            rssi: -48,
+            uptime: '2h 14m',
+            connectedDevices: 5,
+            status: 'online'
+        },
+        {
+            id: 2,
+            nodeId: 'ESP32-002',
+            ip: '192.168.1.11',
+            rssi: -62,
+            uptime: '4h 32m',
+            connectedDevices: 3,
+            status: 'online'
+        }
+    ]);
+});
+
+
+// Traffic
+app.get('/api/traffic', (req, res) => {
+    res.json([
+        { time: '08:00', usage: 20 },
+        { time: '09:00', usage: 35 },
+        { time: '10:00', usage: 50 },
+        { time: '11:00', usage: 42 }
+    ]);
+});
+
 // 7. Update room limit
 app.post('/api/update-limit', (req, res) => {
     const { roomId, newLimit } = req.body;
