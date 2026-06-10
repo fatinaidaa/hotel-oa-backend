@@ -222,12 +222,10 @@ async function(e){
             statusMsg.innerHTML =
             "Login successful! Connecting...";
 
-            setTimeout(() => {
-
-                window.location.href =
-                "http://192.168.125.2:2050/redirect"
-
-            },1500);
+	    document.getElementById(
+	    "status"
+	    ).textContent =
+	    "Connected";
 
         }
 
