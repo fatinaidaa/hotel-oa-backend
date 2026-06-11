@@ -271,7 +271,7 @@ app.get('/api/rooms', (req, res) => {
         bandwidth: calculateBandwidth(rooms[id]),
         status: rooms[id].devices >= rooms[id].limit ? 'limit' : 'normal'
     }));
-    res.json({ rooms: roomsArray });
+    res.json(roomsArray);
 });
 
 // ===== DASHBOARD ROUTES =====
