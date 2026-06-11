@@ -183,25 +183,66 @@ app.post('/api/check-device-limit', (req, res) => {
 
 // 2. Submit device request
 app.post('/api/request-device', (req, res) => {
+
     const { room, phoneNumber, mac } = req.body;
 
     if (!room || !phoneNumber) {
-        return res.status(400).json({ error: 'Room and phone number required' });
+
+        return res.status(400).json({
+            error: 'Room and phone number required'
+        });
+
     }
 
-    const request = {
-        id: Date.now(),
-        room,
-        phoneNumber,
-        mac: mac || 'unknown',
-        timestamp: new Date().toISOString(),
-        status: 'pending'
-    };
+    // Save request ke Railway DB
+    db.query(
 
-    pendingRequests.push(request);
-    console.log(`[REQUEST] New request from ${phoneNumber} for Room ${room}`);
+        `INSERT INTO connection_requests
+        (
+            room_id,
+            phone_number,
+            mac_address,
+            status
+        )
+        VALUES (?, ?, ?, 'pending')`,
 
-    res.json({ success: true, requestId: request.id, message: 'Request submitted' });
+        [
+            room,
+            phoneNumber,
+            mac || 'unknown'
+        ],
+
+        (err, result) => {
+
+            if (err) {
+
+                console.error(err);
+
+                return res.status(500).json({
+                    success: false,
+                    message: 'Database error'
+                });
+
+            }
+
+            console.log(
+                `[REQUEST] New request from ${phoneNumber} for Room ${room}`
+            );
+
+            res.json({
+
+                success: true,
+
+                requestId: result.insertId,
+
+                message: 'Request submitted'
+
+            });
+
+        }
+
+    );
+
 });
 
 // 3. Get pending requests
