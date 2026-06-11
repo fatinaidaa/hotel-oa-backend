@@ -306,24 +306,50 @@ app.get('/api/rooms', (req, res) => {
 
 // ===== DASHBOARD ROUTES =====
 
-// Sessions / Connected Users
+// Active sessions (REAL Railway DB)
 app.get('/api/sessions/active', (req, res) => {
-    res.json([
-        {
-            mac: 'AA:BB:CC:11',
-            room: 101,
-            device: 'iPhone 14',
-            status: 'connected'
-        },
-        {
-            mac: 'AA:BB:CC:22',
-            room: 102,
-            device: 'Samsung A54',
-            status: 'connected'
-        }
-    ]);
-});
 
+    db.query(
+
+        'SELECT * FROM active_sessions WHERE status = "connected"',
+
+        (err, results) => {
+
+            if (err) {
+
+                console.error(err);
+
+                return res.status(500).json({
+                    error: 'Database error'
+                });
+
+            }
+
+            const sessions = results.map(session => ({
+
+                id: session.id,
+
+                room_id: session.room_id,
+
+                phone_number: session.phone_number,
+
+                mac_address: session.mac_address,
+
+                device_name: session.device_name,
+
+                login_time: session.login_time,
+
+                status: session.status
+
+            }));
+
+            res.json(sessions);
+
+        }
+
+    );
+
+});
 
 // Requests
 app.get('/api/requests', (req, res) => {
