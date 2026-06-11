@@ -9,41 +9,30 @@ const app = express();
 const PORT = 3000;
 
 // ===== RAILWAY MYSQL =====
-const db = mysql.createConnection(
-    'mysql://root:bnZsDdWhZKPOTWDaLSWSVNfyeagsVRHx@acela.proxy.rlwy.net:46443/railway'
-);
-
-db.connect((err) => {
-
-    if (err) {
-
-        console.error(
-            '❌ Railway DB Failed:',
-            err
-        );
-
-        return;
-    }
-
-    console.log(
-        '✅ Railway MySQL Connected!'
-    );
-
+const db = mysql.createPool({
+    uri: 'mysql://root:bnZsDdWhZKPOTWDaLSWSVNfyeagsVRHx@acela.proxy.rlwy.net:46443/railway',
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0
 });
 
-db.connect((err) => {
+db.getConnection((err, connection) => {
 
     if (err) {
+
         console.error(
             '❌ Railway DB Failed:',
             err
         );
+
         return;
     }
 
     console.log(
         '✅ Railway MySQL Connected!'
     );
+
+    connection.release();
 
 });
 
@@ -402,16 +391,60 @@ app.get('/api/traffic', (req, res) => {
     ]);
 });
 
-// 7. Update room limit
-app.post('/api/update-limit', (req, res) => {
-    const { roomId, newLimit } = req.body;
-    if (!rooms[roomId]) return res.status(404).json({ error: 'Room not found' });
-    if (newLimit < 1) return res.status(400).json({ error: 'Limit must be at least 1' });
+// 7. Update room limit (Railway DB)
+app.put('/api/rooms/:id/limit', (req, res) => {
 
-    rooms[roomId].limit = newLimit;
-    console.log(`[UPDATE] Room ${roomId} limit: ${newLimit}`);
+    const roomId = req.params.id;
+    const { limit } = req.body;
 
-    res.json({ success: true, roomId, newLimit });
+    if (!limit || limit < 1) {
+
+        return res.status(400).json({
+            error: 'Limit must be at least 1'
+        });
+
+    }
+
+    db.query(
+
+        'UPDATE rooms SET device_limit = ? WHERE id = ?',
+
+        [limit, roomId],
+
+        (err, result) => {
+
+            if (err) {
+
+                console.error(err);
+
+                return res.status(500).json({
+                    error: 'Database error'
+                });
+
+            }
+
+            if (result.affectedRows === 0) {
+
+                return res.status(404).json({
+                    error: 'Room not found'
+                });
+
+            }
+
+            console.log(
+                `[UPDATE] Room ${roomId} limit updated to ${limit}`
+            );
+
+            res.json({
+                success: true,
+                roomId,
+                limit
+            });
+
+        }
+
+    );
+
 });
 
 // ===== STAFF SIGNUP =====
