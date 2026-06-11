@@ -382,6 +382,145 @@ app.get('/api/requests', (req, res) => {
 
 });
 
+// Allow Request
+app.put('/api/requests/:id/allow', (req, res) => {
+
+    const requestId = req.params.id;
+
+    // Ambil request pending
+    db.query(
+
+        'SELECT * FROM connection_requests WHERE id = ?',
+
+        [requestId],
+
+        (err, results) => {
+
+            if (err) {
+
+                console.error(err);
+
+                return res.status(500).json({
+                    error: 'Database error'
+                });
+
+            }
+
+            if (results.length === 0) {
+
+                return res.status(404).json({
+                    error: 'Request not found'
+                });
+
+            }
+
+            const request = results[0];
+
+            // Add ke active_sessions
+            db.query(
+
+                `INSERT INTO active_sessions
+                (
+                    room_id,
+                    phone_number,
+                    mac_address,
+                    device_name,
+                    login_time,
+                    status
+                )
+                VALUES (?, ?, ?, ?, NOW(), ?)`,
+
+                [
+                    request.room_id,
+                    request.phone_number,
+                    request.mac_address,
+                    'Guest Device',
+                    'connected'
+                ],
+
+                (err) => {
+
+                    if (err) {
+
+                        console.error(err);
+
+                        return res.status(500).json({
+                            error:
+                            'Failed add session'
+                        });
+
+                    }
+
+                    // Update room devices +1
+                    db.query(
+
+                        `UPDATE rooms
+                         SET devices = devices + 1
+                         WHERE id = ?`,
+
+                        [request.room_id],
+
+                        (err) => {
+
+                            if (err) {
+
+                                console.error(err);
+
+                                return res.status(500)
+                                .json({
+                                    error:
+                                    'Failed update room'
+                                });
+
+                            }
+
+                            // Delete request
+                            db.query(
+
+                                `DELETE FROM
+                                 connection_requests
+                                 WHERE id = ?`,
+
+                                [requestId],
+
+                                (err) => {
+
+                                    if (err) {
+
+                                        console.error(err);
+
+                                        return res.status(500)
+                                        .json({
+                                            error:
+                                            'Failed remove request'
+                                        });
+
+                                    }
+
+                                    res.json({
+                                        success: true,
+                                        message:
+                                        'Request approved'
+                                    });
+
+                                }
+
+                            );
+
+                        }
+
+                    );
+
+                }
+
+            );
+
+        }
+
+    );
+
+});
+
 // Nodes
 app.get('/api/nodes', (req, res) => {
     res.json([
