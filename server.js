@@ -134,55 +134,13 @@ app.post('/api/login', (req, res) => {
     }
 
     // Check device limit
-    if (room.devices >= room.limit) {
-
-    // Insert pending request
-    db.query(
-
-        `INSERT INTO connection_requests
-        (
-            room_id,
-            phone_number,
-            mac_address,
-            status
-        )
-        VALUES (?, ?, ?, 'pending')`,
-
-        [
-            room.id,
-            phone,
-            macAddress
-        ],
-
-        (err) => {
-
-            if (err) {
-
-                console.error(err);
-
-                return res.status(500).json({
-                    success: false,
-                    message: 'Database error'
-                });
-
-            }
-
-            return res.json({
-
-                success: false,
-                limitExceeded: true,
-                requestSent: true,
-                message:
-                'Request sent for staff approval'
-
-            });
-
-        }
-
-    );
-
-    return;
-}
+    if (roomData.devices >= roomData.limit) {
+        return res.json({
+            success: false,
+            limitExceeded: true,
+            message: 'Device limit exceeded'
+        });
+    }
 
     // Allow connection
     roomData.devices++;
