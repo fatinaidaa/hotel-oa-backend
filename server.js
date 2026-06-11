@@ -339,14 +339,33 @@ app.get('/api/sessions/active', (req, res) => {
 // Requests
 app.get('/api/requests', (req, res) => {
 
-    const pending =
-        pendingRequests.filter(
-            r => r.status === 'pending'
-        );
+    db.query(
 
-    res.json(pending);
+        `SELECT * FROM
+        connection_requests
+        WHERE status='pending'`,
+
+        (err, results) => {
+
+            if (err) {
+
+                console.error(err);
+
+                return res.status(500)
+                .json({
+                    error:
+                    'Database error'
+                });
+
+            }
+
+            res.json(results);
+
+        }
+
+    );
+
 });
-
 
 // Nodes
 app.get('/api/nodes', (req, res) => {
