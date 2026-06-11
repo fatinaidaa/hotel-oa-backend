@@ -263,15 +263,56 @@ app.post('/api/reject-request', (req, res) => {
 });
 
 // 6. Get all rooms
+// 6. Get all rooms
 app.get('/api/rooms', (req, res) => {
-    const roomsArray = Object.keys(rooms).map(id => ({
-        id: parseInt(id),
-        devices: rooms[id].devices,
-        limit: rooms[id].limit,
-        bandwidth: calculateBandwidth(rooms[id]),
-        status: rooms[id].devices >= rooms[id].limit ? 'limit' : 'normal'
-    }));
-    res.json(roomsArray);
+
+    db.query(
+        'SELECT * FROM rooms',
+
+        (err, results) => {
+
+            if (err) {
+
+                console.error(err);
+
+                return res.status(500).json({
+                    error: 'Database error'
+                });
+
+            }
+
+            const roomsArray =
+                results.map(room => ({
+
+                    id: room.id,
+
+                    devices:
+                    room.devices,
+
+                    limit:
+                    room.device_limit,
+
+                    bandwidth:
+                    calculateBandwidth({
+                        devices:
+                        room.devices,
+
+                        limit:
+                        room.device_limit
+                    }),
+
+                    status:
+                    room.status
+                }));
+
+            res.json(
+                roomsArray
+            );
+
+        }
+
+    );
+
 });
 
 // ===== DASHBOARD ROUTES =====
