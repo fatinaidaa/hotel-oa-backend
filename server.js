@@ -636,7 +636,17 @@ app.get('/api/nodes', (req, res) => {
 
     db.query(
 
-        'SELECT * FROM nodes',
+        `
+        SELECT
+            *,
+            CASE
+                WHEN TIMESTAMPDIFF(SECOND, last_seen, NOW()) > 30
+                THEN 'offline'
+                ELSE 'online'
+            END AS status
+        FROM nodes
+        ORDER BY room_id
+        `,
 
         (err, results) => {
 
@@ -657,7 +667,6 @@ app.get('/api/nodes', (req, res) => {
     );
 
 });
-
 
 // Traffic
 app.get('/api/traffic', (req, res) => {
