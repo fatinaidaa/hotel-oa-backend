@@ -115,6 +115,75 @@ const roomCredentials = {
 };
 
 // ===== API ROUTES =====
+app.post('/api/node-report', (req, res) => {
+
+    const {
+        nodeId,
+        room,
+        rssi,
+        signalQuality,
+        ip,
+        uptime,
+        status
+    } = req.body;
+
+    db.query(
+
+        `INSERT INTO nodes
+        (
+            node_id,
+            room_id,
+            rssi,
+            signal_quality,
+            ip_address,
+            uptime,
+            status
+        )
+
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+
+        ON DUPLICATE KEY UPDATE
+
+            room_id = VALUES(room_id),
+            rssi = VALUES(rssi),
+            signal_quality = VALUES(signal_quality),
+            ip_address = VALUES(ip_address),
+            uptime = VALUES(uptime),
+            status = VALUES(status),
+            last_seen = NOW()
+        `,
+
+        [
+            nodeId,
+            room,
+            rssi,
+            signalQuality,
+            ip,
+            uptime,
+            status
+        ],
+
+        (err) => {
+
+            if (err) {
+
+                console.error(err);
+
+                return res.status(500).json({
+                    error: 'Database error'
+                });
+
+            }
+
+            res.json({
+                success: true
+            });
+
+        }
+
+    );
+
+});
 
 // 0. Login endpoint (called from ESP32)
 app.post('/api/login', (req, res) => {
@@ -564,26 +633,29 @@ app.put('/api/requests/:id/allow', (req, res) => {
 
 // Nodes
 app.get('/api/nodes', (req, res) => {
-    res.json([
-        {
-            id: 1,
-            nodeId: 'ESP32-001',
-            ip: '192.168.1.10',
-            rssi: -48,
-            uptime: '2h 14m',
-            connectedDevices: 5,
-            status: 'online'
-        },
-        {
-            id: 2,
-            nodeId: 'ESP32-002',
-            ip: '192.168.1.11',
-            rssi: -62,
-            uptime: '4h 32m',
-            connectedDevices: 3,
-            status: 'online'
+
+    db.query(
+
+        'SELECT * FROM nodes',
+
+        (err, results) => {
+
+            if (err) {
+
+                console.error(err);
+
+                return res.status(500).json({
+                    error: 'Database error'
+                });
+
+            }
+
+            res.json(results);
+
         }
-    ]);
+
+    );
+
 });
 
 
