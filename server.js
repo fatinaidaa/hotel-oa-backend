@@ -234,9 +234,10 @@ app.post('/api/login', (req, res) => {
                     mac_address,
                     device_name,
                     login_time,
+                    last_seen,
                     status
                 )
-                VALUES (?, ?, ?, ?, NOW(), ?)`,
+                VALUES (?, ?, ?, ?, NOW(), NOW(), ?)`,
                 [
                     room,
                     'ESP32 User',
@@ -1023,6 +1024,78 @@ app.get('*', (req, res) => {
     );
 
 });
+
+setInterval(() => {
+
+    db.query(
+
+        `
+        SELECT *
+        FROM active_sessions
+        WHERE status = 'connected'
+        AND TIMESTAMPDIFF(MINUTE, last_seen, NOW()) > 2
+        `,
+
+        (err, sessions) => {
+
+            if (err) {
+                console.error(err);
+                return;
+            }
+
+            sessions.forEach(session => {
+
+                console.log(
+                    `[AUTO DISCONNECT] Room ${session.room_id}`
+                );
+
+                db.query(
+                    `
+                    UPDATE active_sessions
+                    SET status = 'disconnected'
+                    WHERE id = ?
+                    `,
+                    [session.id],
+                    (err) => {
+
+                        if (err) {
+                            console.error(
+                                'DISCONNECT SESSION ERROR:',
+                                err
+                            );
+                        }
+                    }
+                );
+
+                db.query(
+                    `
+                    UPDATE rooms
+                    SET devices = GREATEST(devices - 1, 0)
+                    WHERE id = ?
+                    `,
+                    [session.room_id],
+                    (err) => {
+
+                        if (err) {
+                            console.error(
+                                'UPDATE ROOM ERROR:',
+                                err
+                            );
+                        } else {
+                            console.log(
+                                `Room ${session.room_id} devices reduced`
+                            );
+                        }
+                    }
+                );
+
+            });
+
+        }
+
+    );
+
+}, 60000);
 
 // ===== START SERVER =====
 app.listen(PORT, '0.0.0.0', () => {
