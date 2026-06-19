@@ -72,9 +72,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // ===== IN-MEMORY DATABASE =====
 const rooms = {
-    101: { devices: 3, limit: 3, connectedMACs: ['aa:bb:cc:dd:ee:f1', 'aa:bb:cc:dd:ee:f2', 'aa:bb:cc:dd:ee:f3'] },
-    102: { devices: 2, limit: 3, connectedMACs: ['aa:bb:cc:dd:ee:f4', 'aa:bb:cc:dd:ee:f5'] },
-    103: { devices: 1, limit: 2, connectedMACs: ['aa:bb:cc:dd:ee:f6'] }
+    101: { devices: 0, limit: 3, connectedMACs: [] },
+    102: { devices: 0, limit: 3, connectedMACs: [] },
 };
 
 const pendingRequests = [];
@@ -203,6 +202,8 @@ app.post('/api/login', (req, res) => {
     }
 
     // Check device limit
+    console.log('ROOM DATA:', roomData);
+
     if (roomData.devices >= roomData.limit) {
         return res.json({
             success: false,
