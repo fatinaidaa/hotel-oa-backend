@@ -1097,7 +1097,7 @@ setInterval(() => {
 
     );
 
-}, 60000);
+}, 5000);
 
 // ===== START SERVER =====
 app.listen(PORT, '0.0.0.0', () => {
