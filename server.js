@@ -410,11 +410,22 @@ app.post('/api/reject-request', (req, res) => {
 });
 
 // 6. Get all rooms
-// 6. Get all rooms
 app.get('/api/rooms', (req, res) => {
 
     db.query(
-        'SELECT * FROM rooms',
+
+        `
+        SELECT
+            r.id,
+            r.device_limit,
+            r.status,
+            COUNT(a.id) AS devices
+        FROM rooms r
+        LEFT JOIN active_sessions a
+            ON r.id = a.room_id
+            AND a.status = 'connected'
+        GROUP BY r.id
+        `,
 
         (err, results) => {
 
@@ -428,33 +439,24 @@ app.get('/api/rooms', (req, res) => {
 
             }
 
-            const roomsArray =
-                results.map(room => ({
+            const roomsArray = results.map(room => ({
 
-                    id: room.id,
+                id: room.id,
 
-                    devices:
-                    room.devices,
+                devices: room.devices,
 
-                    limit:
-                    room.device_limit,
+                limit: room.device_limit,
 
-                    bandwidth:
-                    calculateBandwidth({
-                        devices:
-                        room.devices,
+                bandwidth: calculateBandwidth({
+                    devices: room.devices,
+                    limit: room.device_limit
+                }),
 
-                        limit:
-                        room.device_limit
-                    }),
+                status: room.status
 
-                    status:
-                    room.status
-                }));
+            }));
 
-            res.json(
-                roomsArray
-            );
+            res.json(roomsArray);
 
         }
 
