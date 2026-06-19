@@ -214,15 +214,61 @@ app.post('/api/login', (req, res) => {
 
     // Allow connection
     roomData.devices++;
-    console.log(`[LOGIN SUCCESS] Room ${room} - ${roomData.devices}/${roomData.limit}`);
 
-    return res.json({
-        success: true,
-        message: 'Access granted',
-        room: room,
-        devicesConnected: roomData.devices,
-        limit: roomData.limit
-    });
+    db.query(
+        `UPDATE rooms
+        SET devices = devices + 1
+        WHERE id = ?`,
+        [room],
+        (err) => {
+
+            if (err) {
+            console.error(err);
+            }
+
+            db.query(
+                `INSERT INTO active_sessions
+                (
+                    room_id,
+                    phone_number,
+                    mac_address,
+                    device_name,
+                    login_time,
+                    status
+                )
+                VALUES (?, ?, ?, ?, NOW(), ?)`,
+                [
+                    room,
+                    'ESP32 User',
+                    'ESP32',
+                    'Mesh Node',
+                    'connected'
+                ],
+                (err) => {
+
+                    if (err) {
+                        console.error(err);
+                    }
+
+                    console.log(
+                        `[LOGIN SUCCESS] Room ${room} - ${roomData.devices}/${roomData.limit}`
+                    );
+                    
+                    console.log("LOGIN DATABASE TEST");
+
+                    return res.json({
+                        success: true,
+                        message: 'Access granted',
+                        room: room,
+                        devicesConnected: roomData.devices,
+                        limit: roomData.limit
+                    });
+
+                }
+            );
+
+        }
+    );
 });
 
 // 1. Check device limit
