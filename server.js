@@ -1295,6 +1295,42 @@ app.post('/api/heartbeat', (req, res) => {
 
 });
 
+app.post('/api/disconnect', (req, res) => {
+
+    const { room } = req.body;
+
+    db.query(
+        `
+        UPDATE active_sessions
+        SET status = 'disconnected'
+        WHERE room_id = ?
+        AND status = 'connected'
+        `,
+        [room],
+        (err) => {
+
+            if (err) {
+
+                console.error(err);
+
+                return res.status(500).json({
+                    success: false
+                });
+
+            }
+
+            console.log(
+                `[DISCONNECT] Room ${room}`
+            );
+
+            res.json({
+                success: true
+            });
+
+        }
+    );
+
+});
 
 // ===== START SERVER =====
 app.listen(PORT, '0.0.0.0', () => {
