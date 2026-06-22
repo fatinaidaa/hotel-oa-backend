@@ -306,10 +306,15 @@ app.post('/api/login', (req, res) => {
     db.query(
 
         `
-        SELECT COUNT(*) AS devices
-        FROM active_sessions
-        WHERE room_id = ?
-        AND status = 'connected'
+        SELECT
+            COUNT(a.id) AS devices,
+            r.device_limit
+        FROM rooms r
+        LEFT JOIN active_sessions a
+            ON r.id = a.room_id
+            AND a.status = 'connected'
+        WHERE r.id = ?
+        GROUP BY r.id
         `,
 
         [room],
@@ -330,7 +335,7 @@ app.post('/api/login', (req, res) => {
                 results[0].devices;
 
             const limit =
-                credentials.limit;
+                results[0].device_limit;
 
             console.log(
                 `[DB COUNT] ${devices}/${limit}`
