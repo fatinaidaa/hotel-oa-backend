@@ -185,6 +185,7 @@ app.post('/api/node-report', (req, res) => {
 });
 
 // 0. Login endpoint (called from ESP32)
+/*
 app.post('/api/login', (req, res) => {
     const { room, password } = req.body;
     console.log(`[LOGIN] Room ${room}`);
@@ -274,6 +275,156 @@ app.post('/api/login', (req, res) => {
         }
     );
 });
+*/
+
+app.post('/api/login', (req, res) => {
+
+    const { room, password } = req.body;
+
+    console.log(`[LOGIN] Room ${room}`);
+
+    const credentials = roomCredentials[room];
+
+    if (!credentials) {
+
+        return res.json({
+            success: false,
+            message: 'Room not found'
+        });
+
+    }
+
+    if (credentials.password !== password) {
+
+        return res.json({
+            success: false,
+            message: 'Wrong password'
+        });
+
+    }
+
+    db.query(
+
+        `
+        SELECT COUNT(*) AS devices
+        FROM active_sessions
+        WHERE room_id = ?
+        AND status = 'connected'
+        `,
+
+        [room],
+
+        (err, results) => {
+
+            if (err) {
+
+                console.error(err);
+
+                return res.status(500).json({
+                    success: false
+                });
+
+            }
+
+            const devices =
+                results[0].devices;
+
+            const limit =
+                credentials.limit;
+
+            console.log(
+                `[DB COUNT] ${devices}/${limit}`
+            );
+
+            if (devices >= limit) {
+
+                return res.json({
+
+                    success: false,
+
+                    limitExceeded: true,
+
+                    message:
+                    'Device limit exceeded'
+
+                });
+
+            }
+
+            db.query(
+
+                `
+                INSERT INTO active_sessions
+                (
+                    room_id,
+                    phone_number,
+                    mac_address,
+                    device_name,
+                    login_time,
+                    last_seen,
+                    status
+                )
+                VALUES
+                (
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    NOW(),
+                    NOW(),
+                    ?
+                )
+                `,
+
+                [
+                    room,
+                    'ESP32 User',
+                    'ESP32',
+                    'Mesh Node',
+                    'connected'
+                ],
+
+                (err) => {
+
+                    if (err) {
+
+                        console.error(err);
+
+                        return res.status(500).json({
+                            success: false
+                        });
+
+                    }
+
+                    console.log(
+                        `[LOGIN SUCCESS] Room ${room}`
+                    );
+
+                    res.json({
+
+                        success: true,
+
+                        message:
+                        'Access granted',
+
+                        room,
+
+                        devicesConnected:
+                        devices + 1,
+
+                        limit
+
+                    });
+
+                }
+
+            );
+
+        }
+
+    );
+
+});
 
 // 1. Check device limit
 app.post('/api/check-device-limit', (req, res) => {
@@ -293,6 +444,7 @@ app.post('/api/check-device-limit', (req, res) => {
     if (roomData.devices < roomData.limit) {
         roomData.devices++;
         roomData.connectedMACs.push(mac);
+
         console.log(`[ALLOWED] Room ${room} - ${roomData.devices}/${roomData.limit}`);
         return res.json({ allowed: true, currentDevices: roomData.devices, limit: roomData.limit });
     } else {
