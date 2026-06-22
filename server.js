@@ -72,7 +72,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // ===== IN-MEMORY DATABASE =====
 const rooms = {
-    101: { devices: 0, limit: 3, connectedMACs: [] },
+    101: { devices: 0, limit: 1, connectedMACs: [] },
     102: { devices: 0, limit: 3, connectedMACs: [] },
 };
 
