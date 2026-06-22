@@ -193,6 +193,8 @@ app.post('/api/login', (req, res) => {
     const roomData = rooms[roomNum];
     const credentials = roomCredentials[roomNum];
 
+    console.log("ROOM MEMORY:", roomData);
+
     if (!roomData || !credentials) {
         return res.json({ success: false, message: 'Room not found' });
     }
@@ -203,6 +205,7 @@ app.post('/api/login', (req, res) => {
 
     // Check device limit
     console.log('ROOM DATA:', roomData);
+    console.log('DB ROOM:', room);
 
     if (roomData.devices >= roomData.limit) {
         return res.json({
@@ -1035,7 +1038,7 @@ setInterval(() => {
         SELECT *
         FROM active_sessions
         WHERE status = 'connected'
-        AND TIMESTAMPDIFF(MINUTE, last_seen, NOW()) > 2
+        AND TIMESTAMPDIFF(SECOND, last_seen, NOW()) > 30
         `,
 
         (err, sessions) => {
@@ -1098,6 +1101,39 @@ setInterval(() => {
     );
 
 }, 5000);
+
+
+app.post('/api/heartbeat', (req, res) => {
+
+    const { room } = req.body;
+
+    db.query(
+        `
+        UPDATE active_sessions
+        SET last_seen = NOW()
+        WHERE room_id = ?
+        AND status = 'connected'
+        `,
+        [room],
+        (err) => {
+
+            if (err) {
+                console.error(err);
+
+                return res.status(500).json({
+                    success: false
+                });
+            }
+
+            res.json({
+                success: true
+            });
+
+        }
+    );
+
+});
+
 
 // ===== START SERVER =====
 app.listen(PORT, '0.0.0.0', () => {
