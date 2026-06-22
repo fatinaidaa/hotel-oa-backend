@@ -1259,6 +1259,10 @@ app.post('/api/heartbeat', (req, res) => {
 
     const { room } = req.body;
 
+    console.log(
+    `[HEARTBEAT] Room ${room}`
+    );
+
     db.query(
         `
         UPDATE active_sessions
