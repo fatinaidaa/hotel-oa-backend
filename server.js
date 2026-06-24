@@ -780,6 +780,57 @@ app.get('/api/sessions/active', (req, res) => {
 
 });
 
+// Disconnect one device by MAC address
+app.delete('/api/sessions/:mac', (req, res) => {
+
+    const macAddress = req.params.mac;
+
+    db.query(
+
+        `UPDATE active_sessions
+         SET status = 'disconnected'
+         WHERE mac_address = ?
+         AND status = 'connected'`,
+
+        [macAddress],
+
+        (err, result) => {
+
+            if (err) {
+
+                console.error(err);
+
+                return res.status(500).json({
+                    success: false,
+                    message: 'Failed to disconnect device'
+                });
+
+            }
+
+            if (result.affectedRows === 0) {
+
+                return res.status(404).json({
+                    success: false,
+                    message: 'Connected device not found'
+                });
+
+            }
+
+            console.log(
+                `[MANUAL DISCONNECT] MAC ${macAddress}`
+            );
+
+            res.json({
+                success: true,
+                message: 'Device disconnected'
+            });
+
+        }
+
+    );
+
+});
+
 // Requests
 app.get('/api/requests', (req, res) => {
 
