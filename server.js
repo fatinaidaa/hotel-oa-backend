@@ -1103,6 +1103,21 @@ app.post('/api/auth/login', (req, res) => {
 
 });
 
+app.get(
+    '/telegram-test',
+    async (req, res) => {
+
+        await sendTelegram(
+            '🚀 HOTEL OA Telegram Test Success'
+        );
+
+        res.send(
+            'Telegram Sent'
+        );
+
+    }
+);
+
 
 // 8. Serve landing page for all non-API routes
 app.get('*', (req, res) => {
@@ -1274,20 +1289,6 @@ app.post('/api/disconnect', (req, res) => {
 
 });
 
-app.get(
-    '/telegram-test',
-    async (req, res) => {
-
-        await sendTelegram(
-            '🚀 HOTEL OA Telegram Test Success'
-        );
-
-        res.send(
-            'Telegram Sent'
-        );
-
-    }
-);
 
 // ===== START SERVER =====
 app.listen(PORT, '0.0.0.0', () => {
