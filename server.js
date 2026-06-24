@@ -221,9 +221,9 @@ app.post('/api/node-report', (req, res) => {
 
 app.post('/api/login', (req, res) => {
 
-    const { room, password } = req.body;
+    const { room, password, mac } = req.body;
 
-    console.log(`[LOGIN] Room ${room}`);
+    console.log(`[LOGIN] Room ${room} - MAC ${mac}`);
 
     const credentials = roomCredentials[room];
 
@@ -245,27 +245,34 @@ app.post('/api/login', (req, res) => {
 
     }
 
-    db.query(
+    if (!mac) {
 
-        `
-        SELECT
-            COUNT(a.id) AS devices,
-            r.device_limit
-        FROM rooms r
-        LEFT JOIN active_sessions a
-            ON r.id = a.room_id
-            AND a.status = 'connected'
-        WHERE r.id = ?
-        GROUP BY r.id
-        `,
+        return res.status(400).json({
+            success: false,
+            message: 'Device MAC address is required'
+        });
 
-        [room],
+    }
 
-        (err, results) => {
+    db.getConnection((connectionError, connection) => {
 
-            if (err) {
+        if (connectionError) {
 
-                console.error(err);
+            console.error(connectionError);
+
+            return res.status(500).json({
+                success: false,
+                message: 'Database connection error'
+            });
+
+        }
+
+        connection.beginTransaction((transactionError) => {
+
+            if (transactionError) {
+
+                connection.release();
+                console.error(transactionError);
 
                 return res.status(500).json({
                     success: false
@@ -273,103 +280,237 @@ app.post('/api/login', (req, res) => {
 
             }
 
-            const devices =
-                results[0].devices;
-
-            const limit =
-                results[0].device_limit;
-
-            console.log(
-                `[DB COUNT] ${devices}/${limit}`
-            );
-
-            if (devices >= limit) {
-
-                return res.json({
-
-                    success: false,
-
-                    limitExceeded: true,
-
-                    message:
-                    'Device limit exceeded'
-
-                });
-
-            }
-
-            db.query(
+            connection.query(
 
                 `
-                INSERT INTO active_sessions
-                (
-                    room_id,
-                    phone_number,
-                    mac_address,
-                    device_name,
-                    login_time,
-                    last_seen,
-                    status
-                )
-                VALUES
-                (
-                    ?,
-                    ?,
-                    ?,
-                    ?,
-                    NOW(),
-                    NOW(),
-                    ?
-                )
+                SELECT
+                    r.device_limit,
+                    (
+                        SELECT COUNT(*)
+                        FROM active_sessions a
+                        WHERE a.room_id = r.id
+                        AND a.status = 'connected'
+                    ) AS devices,
+                    (
+                        SELECT COUNT(*)
+                        FROM connection_requests cr
+                        WHERE cr.room_id = r.id
+                        AND cr.status = 'approved'
+                    ) AS reserved_slots,
+                    (
+                        SELECT cr.id
+                        FROM connection_requests cr
+                        WHERE cr.room_id = r.id
+                        AND cr.mac_address = ?
+                        AND cr.status = 'approved'
+                        ORDER BY cr.id
+                        LIMIT 1
+                    ) AS approval_id,
+                    (
+                        SELECT cr.phone_number
+                        FROM connection_requests cr
+                        WHERE cr.room_id = r.id
+                        AND cr.mac_address = ?
+                        AND cr.status = 'approved'
+                        ORDER BY cr.id
+                        LIMIT 1
+                    ) AS approval_phone,
+                    (
+                        SELECT COUNT(*)
+                        FROM active_sessions a
+                        WHERE a.room_id = r.id
+                        AND a.mac_address = ?
+                        AND a.status = 'connected'
+                    ) AS already_connected
+                FROM rooms r
+                WHERE r.id = ?
+                FOR UPDATE
                 `,
 
-                [
-                    room,
-                    'ESP32 User',
-                    'ESP32',
-                    'Mesh Node',
-                    'connected'
-                ],
+                [mac, mac, mac, room],
 
-                (err) => {
+                (lookupError, results) => {
 
-                    if (err) {
+                    if (lookupError || results.length === 0) {
 
-                        console.error(err);
-
-                        return res.status(500).json({
-                            success: false
+                        return connection.rollback(() => {
+                            connection.release();
+                            console.error(
+                                lookupError || `Room ${room} not found`
+                            );
+                            res.status(500).json({
+                                success: false,
+                                message: 'Unable to check room access'
+                            });
                         });
 
                     }
 
+                    const access = results[0];
+                    const devices = Number(access.devices);
+                    const limit = Number(access.device_limit);
+                    const reservedSlots =
+                        Number(access.reserved_slots);
+                    const hasApproval =
+                        access.approval_id !== null;
+                    const unreservedSlots =
+                        limit - devices - reservedSlots;
+
                     console.log(
-                        `[LOGIN SUCCESS] Room ${room}`
+                        `[ACCESS CHECK] Room ${room}: ` +
+                        `${devices}/${limit}, ` +
+                        `reserved=${reservedSlots}, ` +
+                        `approvedMAC=${hasApproval}`
                     );
 
-                    res.json({
+                    if (Number(access.already_connected) > 0) {
 
-                        success: true,
+                        return connection.rollback(() => {
+                            connection.release();
+                            res.json({
+                                success: true,
+                                alreadyConnected: true,
+                                message: 'Device already connected',
+                                room,
+                                devicesConnected: devices,
+                                limit
+                            });
+                        });
 
-                        message:
-                        'Access granted',
+                    }
 
-                        room,
+                    if (!hasApproval && unreservedSlots <= 0) {
 
-                        devicesConnected:
-                        devices + 1,
+                        return connection.rollback(() => {
+                            connection.release();
+                            res.json({
+                                success: false,
+                                limitExceeded: true,
+                                message:
+                                'Device limit exceeded or remaining slot is reserved'
+                            });
+                        });
 
-                        limit
+                    }
 
-                    });
+                    connection.query(
+
+                        `
+                        INSERT INTO active_sessions
+                        (
+                            room_id,
+                            phone_number,
+                            mac_address,
+                            device_name,
+                            login_time,
+                            last_seen,
+                            status
+                        )
+                        VALUES (?, ?, ?, ?, NOW(), NOW(), ?)
+                        `,
+
+                        [
+                            room,
+                            access.approval_phone ||
+                                'ESP32 User',
+                            mac,
+                            'Guest Device',
+                            'connected'
+                        ],
+
+                        (insertError) => {
+
+                            if (insertError) {
+
+                                return connection.rollback(() => {
+                                    connection.release();
+                                    console.error(insertError);
+                                    res.status(500).json({
+                                        success: false
+                                    });
+                                });
+
+                            }
+
+                            const finishLogin = () => {
+
+                                connection.commit((commitError) => {
+
+                                    if (commitError) {
+
+                                        return connection.rollback(() => {
+                                            connection.release();
+                                            console.error(commitError);
+                                            res.status(500).json({
+                                                success: false
+                                            });
+                                        });
+
+                                    }
+
+                                    connection.release();
+
+                                    console.log(
+                                        `[LOGIN SUCCESS] Room ${room} - MAC ${mac}`
+                                    );
+
+                                    res.json({
+                                        success: true,
+                                        message: hasApproval
+                                            ? 'Approved device connected'
+                                            : 'Access granted',
+                                        room,
+                                        devicesConnected: devices + 1,
+                                        limit
+                                    });
+
+                                });
+
+                            };
+
+                            if (!hasApproval) {
+                                return finishLogin();
+                            }
+
+                            connection.query(
+
+                                `UPDATE connection_requests
+                                 SET status = 'used'
+                                 WHERE id = ?`,
+
+                                [access.approval_id],
+
+                                (updateError) => {
+
+                                    if (updateError) {
+
+                                        return connection.rollback(() => {
+                                            connection.release();
+                                            console.error(updateError);
+                                            res.status(500).json({
+                                                success: false
+                                            });
+                                        });
+
+                                    }
+
+                                    finishLogin();
+
+                                }
+
+                            );
+
+                        }
+
+                    );
 
                 }
 
             );
 
-        }
+        });
 
-    );
+    });
 
 });
 
@@ -675,120 +816,146 @@ app.put('/api/requests/:id/allow', (req, res) => {
 
     const requestId = req.params.id;
 
-    // Ambil request pending
-    db.query(
+    db.getConnection((connectionError, connection) => {
 
-        'SELECT * FROM connection_requests WHERE id = ?',
+        if (connectionError) {
 
-        [requestId],
+            console.error(connectionError);
 
-        (err, results) => {
+            return res.status(500).json({
+                error: 'Database connection error'
+            });
 
-            if (err) {
+        }
 
-                console.error(err);
+        connection.beginTransaction((transactionError) => {
+
+            if (transactionError) {
+
+                connection.release();
+                console.error(transactionError);
 
                 return res.status(500).json({
-                    error: 'Database error'
+                    error: 'Failed to start transaction'
                 });
 
             }
 
-            if (results.length === 0) {
+            connection.query(
 
-                return res.status(404).json({
-                    error: 'Request not found'
-                });
+                `SELECT room_id
+                 FROM connection_requests
+                 WHERE id = ?
+                 AND status = 'pending'
+                 FOR UPDATE`,
 
-            }
+                [requestId],
 
-            const request = results[0];
+                (requestError, requests) => {
 
-            // Add ke active_sessions
-            db.query(
+                    if (requestError) {
 
-                `INSERT INTO active_sessions
-                (
-                    room_id,
-                    phone_number,
-                    mac_address,
-                    device_name,
-                    login_time,
-                    status
-                )
-                VALUES (?, ?, ?, ?, NOW(), ?)`,
-
-                [
-                    request.room_id,
-                    request.phone_number,
-                    request.mac_address,
-                    'Guest Device',
-                    'connected'
-                ],
-
-                (err) => {
-
-                    if (err) {
-
-                        console.error(err);
-
-                        return res.status(500).json({
-                            error:
-                            'Failed add session'
+                        return connection.rollback(() => {
+                            connection.release();
+                            console.error(requestError);
+                            res.status(500).json({
+                                error: 'Database error'
+                            });
                         });
 
                     }
 
-                    // Update room devices +1
-                    db.query(
+                    if (requests.length === 0) {
+
+                        return connection.rollback(() => {
+                            connection.release();
+                            res.status(404).json({
+                                error:
+                                'Request not found or already processed'
+                            });
+                        });
+
+                    }
+
+                    const roomId = requests[0].room_id;
+
+                    connection.query(
 
                         `UPDATE rooms
-                         SET devices = devices + 1
+                         SET device_limit = device_limit + 1
                          WHERE id = ?`,
 
-                        [request.room_id],
+                        [roomId],
 
-                        (err) => {
+                        (roomError, roomResult) => {
 
-                            if (err) {
+                            if (roomError || roomResult.affectedRows === 0) {
 
-                                console.error(err);
-
-                                return res.status(500)
-                                .json({
-                                    error:
-                                    'Failed update room'
+                                return connection.rollback(() => {
+                                    connection.release();
+                                    console.error(
+                                        roomError ||
+                                        `Room ${roomId} not found`
+                                    );
+                                    res.status(500).json({
+                                        error:
+                                        'Failed to update room limit'
+                                    });
                                 });
 
                             }
 
-                            // Delete request
-                            db.query(
+                            connection.query(
 
-                                `DELETE FROM
-                                 connection_requests
+                                `UPDATE connection_requests
+                                 SET status = 'approved'
                                  WHERE id = ?`,
 
                                 [requestId],
 
-                                (err) => {
+                                (updateError) => {
 
-                                    if (err) {
+                                    if (updateError) {
 
-                                        console.error(err);
-
-                                        return res.status(500)
-                                        .json({
-                                            error:
-                                            'Failed remove request'
+                                        return connection.rollback(() => {
+                                            connection.release();
+                                            console.error(updateError);
+                                            res.status(500).json({
+                                                error:
+                                                'Failed to approve request'
+                                            });
                                         });
 
                                     }
 
-                                    res.json({
-                                        success: true,
-                                        message:
-                                        'Request approved'
+                                    connection.commit((commitError) => {
+
+                                        if (commitError) {
+
+                                            return connection.rollback(() => {
+                                                connection.release();
+                                                console.error(commitError);
+                                                res.status(500).json({
+                                                    error:
+                                                    'Failed to approve request'
+                                                });
+                                            });
+
+                                        }
+
+                                        connection.release();
+
+                                        console.log(
+                                            `[APPROVED] Request ${requestId} - Room ${roomId} limit increased`
+                                        );
+
+                                        res.json({
+                                            success: true,
+                                            roomId,
+                                            message:
+                                            'Request approved and room limit increased'
+                                        });
+
                                     });
 
                                 }
@@ -803,9 +970,9 @@ app.put('/api/requests/:id/allow', (req, res) => {
 
             );
 
-        }
+        });
 
-    );
+    });
 
 });
 
