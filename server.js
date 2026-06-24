@@ -809,6 +809,56 @@ app.put('/api/requests/:id/allow', (req, res) => {
 
 });
 
+// Reject Request
+app.put('/api/requests/:id/reject', (req, res) => {
+
+    const requestId = req.params.id;
+
+    db.query(
+
+        `UPDATE connection_requests
+         SET status = 'rejected'
+         WHERE id = ?
+         AND status = 'pending'`,
+
+        [requestId],
+
+        (err, result) => {
+
+            if (err) {
+
+                console.error(err);
+
+                return res.status(500).json({
+                    error: 'Database error'
+                });
+
+            }
+
+            if (result.affectedRows === 0) {
+
+                return res.status(404).json({
+                    error:
+                    'Request not found or already processed'
+                });
+
+            }
+
+            console.log(
+                `[REJECTED] Request ${requestId}`
+            );
+
+            res.json({
+                success: true,
+                message: 'Request rejected'
+            });
+
+        }
+
+    );
+
+});
+
 // Nodes
 app.get('/api/nodes', (req, res) => {
 
