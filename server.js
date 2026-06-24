@@ -448,6 +448,20 @@ app.post('/api/request-device', (req, res) => {
                 `[REQUEST] New request from ${phoneNumber} for Room ${room}`
             );
 
+            sendTelegram(
+
+            `📢 NEW DEVICE REQUEST
+
+            Room: ${room}
+
+            Phone: ${phoneNumber}
+
+            Action Required:
+
+            Open Dashboard to approve/reject.`
+
+            );
+
             res.json({
 
                 success: true,
