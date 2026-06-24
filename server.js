@@ -507,8 +507,18 @@ app.post('/api/approve-request', (req, res) => {
     roomData.limit++;
     request.status = 'approved';
 
-    console.log(`[APPROVED] Request ${requestId} - Room ${roomId} limit: ${roomData.limit}`);
-    sendWhatsAppNotification(request.phoneNumber, 'approved', roomId);
+    console.log(
+    [APPROVED] Request ${requestId} - Room ${roomId} limit: ${roomData.limit}
+    );
+
+    sendTelegram(
+    `✅ REQUEST APPROVED
+
+    Room: ${roomId}
+    Phone: ${request.phoneNumber}
+
+    Additional device access has been granted.`
+    );
 
     res.json({ success: true, newLimit: roomData.limit });
 });
