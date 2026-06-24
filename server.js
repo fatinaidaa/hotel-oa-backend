@@ -459,7 +459,7 @@ app.post('/api/request-device', (req, res) => {
             Action Required:
 
             🔗 Open Dashboard:
-            https://hotel-oa-backend.onrender.com/admin.html
+            https://hotel-oa-dashboard.onrender.com/dashboard
             
             Please review and approve/reject the request.`
             );
