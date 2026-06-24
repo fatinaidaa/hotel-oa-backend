@@ -66,6 +66,39 @@ CREATE TABLE IF NOT EXISTS staff_users (
     );
 });
 
+async function sendTelegram(message) {
+
+    const BOT_TOKEN =
+        process.env.TELEGRAM_BOT_TOKEN;
+
+    const CHAT_ID =
+        "940687524";
+
+    try {
+
+        await axios.post(
+            `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
+            {
+                chat_id: CHAT_ID,
+                text: message
+            }
+        );
+
+        console.log(
+            '[TELEGRAM] Sent'
+        );
+
+    } catch (err) {
+
+        console.error(
+            '[TELEGRAM ERROR]',
+            err.response?.data || err.message
+        );
+
+    }
+
+}
+
 // Middleware
 app.use(cors());
 app.use(express.json());
