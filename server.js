@@ -508,7 +508,7 @@ app.post('/api/approve-request', (req, res) => {
     request.status = 'approved';
 
     console.log(
-    [APPROVED] Request ${requestId} - Room ${roomId} limit: ${roomData.limit}
+     `[APPROVED] Request ${requestId} - Room ${roomId} limit: ${roomData.limit}`
     );
 
     sendTelegram(
