@@ -1274,6 +1274,21 @@ app.post('/api/disconnect', (req, res) => {
 
 });
 
+app.get(
+    '/telegram-test',
+    async (req, res) => {
+
+        await sendTelegram(
+            '🚀 HOTEL OA Telegram Test Success'
+        );
+
+        res.send(
+            'Telegram Sent'
+        );
+
+    }
+);
+
 // ===== START SERVER =====
 app.listen(PORT, '0.0.0.0', () => {
     console.log('\n🚀 Captive Portal Backend running!');
