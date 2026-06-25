@@ -296,13 +296,21 @@ app.post('/api/login', (req, res) => {
                         FROM connection_requests cr
                         WHERE cr.room_id = r.id
                         AND cr.status = 'approved'
+                        AND cr.mac_address IS NOT NULL
+                        AND cr.mac_address <> ''
+                        AND cr.mac_address <> 'unknown'
+                        AND cr.created_at >=
+                            DATE_SUB(NOW(), INTERVAL 10 MINUTE)
                     ) AS reserved_slots,
                     (
                         SELECT cr.id
                         FROM connection_requests cr
                         WHERE cr.room_id = r.id
                         AND cr.mac_address = ?
+                        AND cr.mac_address <> 'unknown'
                         AND cr.status = 'approved'
+                        AND cr.created_at >=
+                            DATE_SUB(NOW(), INTERVAL 10 MINUTE)
                         ORDER BY cr.id
                         LIMIT 1
                     ) AS approval_id,
@@ -311,7 +319,10 @@ app.post('/api/login', (req, res) => {
                         FROM connection_requests cr
                         WHERE cr.room_id = r.id
                         AND cr.mac_address = ?
+                        AND cr.mac_address <> 'unknown'
                         AND cr.status = 'approved'
+                        AND cr.created_at >=
+                            DATE_SUB(NOW(), INTERVAL 10 MINUTE)
                         ORDER BY cr.id
                         LIMIT 1
                     ) AS approval_phone,
@@ -959,7 +970,8 @@ app.put('/api/requests/:id/allow', (req, res) => {
                             connection.query(
 
                                 `UPDATE connection_requests
-                                 SET status = 'approved'
+                                 SET status = 'approved',
+                                     created_at = NOW()
                                  WHERE id = ?`,
 
                                 [requestId],
@@ -1513,20 +1525,28 @@ setInterval(() => {
 
 app.post('/api/heartbeat', (req, res) => {
 
-    const { room } = req.body;
+    const { room, mac } = req.body;
 
     console.log(
-    `[HEARTBEAT] Room ${room}`
+    `[HEARTBEAT] Room ${room} - MAC ${mac}`
     );
+
+    if (!room || !mac) {
+        return res.status(400).json({
+            success: false,
+            message: 'Room and MAC address are required'
+        });
+    }
 
     db.query(
         `
         UPDATE active_sessions
         SET last_seen = NOW()
         WHERE room_id = ?
+        AND mac_address = ?
         AND status = 'connected'
         `,
-        [room],
+        [room, mac],
         (err) => {
 
             if (err) {
@@ -1548,16 +1568,24 @@ app.post('/api/heartbeat', (req, res) => {
 
 app.post('/api/disconnect', (req, res) => {
 
-    const { room } = req.body;
+    const { room, mac } = req.body;
+
+    if (!room || !mac) {
+        return res.status(400).json({
+            success: false,
+            message: 'Room and MAC address are required'
+        });
+    }
 
     db.query(
         `
         UPDATE active_sessions
         SET status = 'disconnected'
         WHERE room_id = ?
+        AND mac_address = ?
         AND status = 'connected'
         `,
-        [room],
+        [room, mac],
         (err) => {
 
             if (err) {
@@ -1571,7 +1599,7 @@ app.post('/api/disconnect', (req, res) => {
             }
 
             console.log(
-                `[DISCONNECT] Room ${room}`
+                `[DISCONNECT] Room ${room} - MAC ${mac}`
             );
 
             res.json({
