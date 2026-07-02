@@ -66,6 +66,287 @@ CREATE TABLE IF NOT EXISTS staff_users (
     );
 });
 
+function ensureColumn(table, column, definition) {
+
+    db.query(
+        `ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`,
+        (err) => {
+
+            if (!err) {
+                console.log(`[DB] Added ${table}.${column}`);
+                return;
+            }
+
+            if (err.code === 'ER_DUP_FIELDNAME') {
+                return;
+            }
+
+            console.error(
+                `[DB] Unable to add ${table}.${column}:`,
+                err
+            );
+
+        }
+    );
+
+}
+
+ensureColumn(
+    'rooms',
+    'wifi_password',
+    'VARCHAR(100) NULL'
+);
+
+ensureColumn(
+    'rooms',
+    'check_in',
+    'DATE NULL'
+);
+
+ensureColumn(
+    'rooms',
+    'check_out',
+    'DATE NULL'
+);
+
+ensureColumn(
+    'rooms',
+    'default_device_limit',
+    'INT NULL'
+);
+
+setTimeout(() => {
+
+    db.query(
+        `UPDATE rooms
+         SET default_device_limit = device_limit
+         WHERE default_device_limit IS NULL`,
+        (err) => {
+
+            if (err) {
+                console.error(
+                    '[DB] Unable to initialize default device limits:',
+                    err
+                );
+            }
+
+        }
+    );
+
+}, 3000);
+
+function getMalaysiaDate() {
+
+    return new Intl.DateTimeFormat(
+        'en-CA',
+        {
+            timeZone: 'Asia/Kuala_Lumpur',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+        }
+    ).format(new Date());
+
+}
+
+function generateRoomPassword(roomId, checkIn) {
+
+    const rawDate =
+        checkIn ||
+        getMalaysiaDate();
+
+    const compactDate =
+        rawDate.replace(/-/g, '').slice(4);
+
+    return `OA${roomId}-${compactDate}`;
+
+}
+
+function autoResetExpiredCheckouts() {
+
+    const today = getMalaysiaDate();
+
+    db.getConnection((connectionError, connection) => {
+
+        if (connectionError) {
+            console.error(
+                '[CHECKOUT RESET] Database connection error:',
+                connectionError
+            );
+            return;
+        }
+
+        connection.beginTransaction((transactionError) => {
+
+            if (transactionError) {
+                connection.release();
+                console.error(
+                    '[CHECKOUT RESET] Transaction error:',
+                    transactionError
+                );
+                return;
+            }
+
+            connection.query(
+
+                `SELECT id
+                 FROM rooms
+                 WHERE check_out IS NOT NULL
+                 AND check_out < ?
+                 AND (
+                    wifi_password IS NOT NULL
+                    OR check_in IS NOT NULL
+                    OR check_out IS NOT NULL
+                 )
+                 FOR UPDATE`,
+
+                [today],
+
+                (lookupError, roomsToReset) => {
+
+                    if (lookupError) {
+
+                        return connection.rollback(() => {
+                            connection.release();
+                            console.error(
+                                '[CHECKOUT RESET] Lookup error:',
+                                lookupError
+                            );
+                        });
+
+                    }
+
+                    if (roomsToReset.length === 0) {
+
+                        return connection.rollback(() => {
+                            connection.release();
+                        });
+
+                    }
+
+                    const roomIds =
+                        roomsToReset.map(room => room.id);
+
+                    connection.query(
+
+                        `UPDATE active_sessions
+                         SET status = 'disconnected'
+                         WHERE room_id IN (?)
+                         AND status = 'connected'`,
+
+                        [roomIds],
+
+                        (sessionError) => {
+
+                            if (sessionError) {
+
+                                return connection.rollback(() => {
+                                    connection.release();
+                                    console.error(
+                                        '[CHECKOUT RESET] Session reset error:',
+                                        sessionError
+                                    );
+                                });
+
+                            }
+
+                            connection.query(
+
+                                `UPDATE connection_requests
+                                 SET status = 'rejected'
+                                 WHERE room_id IN (?)
+                                 AND status IN ('pending', 'approved')`,
+
+                                [roomIds],
+
+                                (requestError) => {
+
+                                    if (requestError) {
+
+                                        return connection.rollback(() => {
+                                            connection.release();
+                                            console.error(
+                                                '[CHECKOUT RESET] Request reset error:',
+                                                requestError
+                                            );
+                                        });
+
+                                    }
+
+                                    connection.query(
+
+                                        `UPDATE rooms
+                                         SET wifi_password = NULL,
+                                             check_in = NULL,
+                                             check_out = NULL,
+                                             device_limit =
+                                                COALESCE(
+                                                    default_device_limit,
+                                                    device_limit,
+                                                    2
+                                                )
+                                         WHERE id IN (?)`,
+
+                                        [roomIds],
+
+                                        (roomError) => {
+
+                                            if (roomError) {
+
+                                                return connection.rollback(() => {
+                                                    connection.release();
+                                                    console.error(
+                                                        '[CHECKOUT RESET] Room reset error:',
+                                                        roomError
+                                                    );
+                                                });
+
+                                            }
+
+                                            connection.commit((commitError) => {
+
+                                                if (commitError) {
+
+                                                    return connection.rollback(() => {
+                                                        connection.release();
+                                                        console.error(
+                                                            '[CHECKOUT RESET] Commit error:',
+                                                            commitError
+                                                        );
+                                                    });
+
+                                                }
+
+                                                connection.release();
+
+                                                console.log(
+                                                    `[CHECKOUT RESET] Reset rooms: ${roomIds.join(', ')}`
+                                                );
+
+                                            });
+
+                                        }
+
+                                    );
+
+                                }
+
+                            );
+
+                        }
+
+                    );
+
+                }
+
+            );
+
+        });
+
+    });
+
+}
+
 async function sendTelegram(message) {
 
     const BOT_TOKEN =
@@ -225,26 +506,6 @@ app.post('/api/login', (req, res) => {
 
     console.log(`[LOGIN] Room ${room} - MAC ${mac}`);
 
-    const credentials = roomCredentials[room];
-
-    if (!credentials) {
-
-        return res.json({
-            success: false,
-            message: 'Room not found'
-        });
-
-    }
-
-    if (credentials.password !== password) {
-
-        return res.json({
-            success: false,
-            message: 'Wrong password'
-        });
-
-    }
-
     if (!mac) {
 
         return res.status(400).json({
@@ -285,6 +546,9 @@ app.post('/api/login', (req, res) => {
                 `
                 SELECT
                     r.device_limit,
+                    r.wifi_password,
+                    DATE_FORMAT(r.check_in, '%Y-%m-%d') AS check_in,
+                    DATE_FORMAT(r.check_out, '%Y-%m-%d') AS check_out,
                     (
                         SELECT COUNT(*)
                         FROM active_sessions a
@@ -358,6 +622,68 @@ app.post('/api/login', (req, res) => {
                     }
 
                     const access = results[0];
+                    const fallbackCredentials =
+                        roomCredentials[room];
+                    const expectedPassword =
+                        access.wifi_password ||
+                        fallbackCredentials?.password;
+
+                    if (!expectedPassword) {
+
+                        return connection.rollback(() => {
+                            connection.release();
+                            res.json({
+                                success: false,
+                                message: 'Room WiFi password is not set'
+                            });
+                        });
+
+                    }
+
+                    if (expectedPassword !== password) {
+
+                        return connection.rollback(() => {
+                            connection.release();
+                            res.json({
+                                success: false,
+                                message: 'Wrong password'
+                            });
+                        });
+
+                    }
+
+                    const today = getMalaysiaDate();
+
+                    if (
+                        access.check_in &&
+                        today < access.check_in
+                    ) {
+
+                        return connection.rollback(() => {
+                            connection.release();
+                            res.json({
+                                success: false,
+                                message: `WiFi access starts on ${access.check_in}`
+                            });
+                        });
+
+                    }
+
+                    if (
+                        access.check_out &&
+                        today > access.check_out
+                    ) {
+
+                        return connection.rollback(() => {
+                            connection.release();
+                            res.json({
+                                success: false,
+                                message: 'WiFi access has expired'
+                            });
+                        });
+
+                    }
+
                     const devices = Number(access.devices);
                     const limit = Number(access.device_limit);
                     const reservedSlots =
@@ -698,6 +1024,9 @@ app.get('/api/rooms', (req, res) => {
         SELECT
             r.id,
             r.device_limit,
+            r.wifi_password,
+            DATE_FORMAT(r.check_in, '%Y-%m-%d') AS check_in,
+            DATE_FORMAT(r.check_out, '%Y-%m-%d') AS check_out,
             r.status,
             COUNT(a.id) AS devices
         FROM rooms r
@@ -719,13 +1048,49 @@ app.get('/api/rooms', (req, res) => {
 
             }
 
-            const roomsArray = results.map(room => ({
+            const today = getMalaysiaDate();
+
+            const roomsArray = results.map(room => {
+
+                let accessStatus = 'vacant';
+
+                if (
+                    room.check_in &&
+                    today < room.check_in
+                ) {
+                    accessStatus = 'upcoming';
+                } else if (
+                    room.check_out &&
+                    today > room.check_out
+                ) {
+                    accessStatus = 'expired';
+                } else if (
+                    room.wifi_password &&
+                    room.check_in &&
+                    room.check_out
+                ) {
+                    accessStatus = 'active';
+                }
+
+                return {
 
                 id: room.id,
 
                 devices: room.devices,
 
                 limit: room.device_limit,
+
+                wifi_password:
+                    room.wifi_password || '',
+
+                check_in:
+                    room.check_in || '',
+
+                check_out:
+                    room.check_out || '',
+
+                access_status:
+                    accessStatus,
 
                 bandwidth: calculateBandwidth({
                     devices: room.devices,
@@ -734,7 +1099,9 @@ app.get('/api/rooms', (req, res) => {
 
                 status: room.status
 
-            }));
+                };
+
+            });
 
             res.json(roomsArray);
 
@@ -1152,9 +1519,12 @@ app.put('/api/rooms/:id/limit', (req, res) => {
 
     db.query(
 
-        'UPDATE rooms SET device_limit = ? WHERE id = ?',
+        `UPDATE rooms
+         SET device_limit = ?,
+             default_device_limit = ?
+         WHERE id = ?`,
 
-        [limit, roomId],
+        [limit, limit, roomId],
 
         (err, result) => {
 
@@ -1184,6 +1554,102 @@ app.put('/api/rooms/:id/limit', (req, res) => {
                 success: true,
                 roomId,
                 limit
+            });
+
+        }
+
+    );
+
+});
+
+// Update room WiFi access period and password
+app.put('/api/rooms/:id/access', (req, res) => {
+
+    const roomId = req.params.id;
+    const {
+        wifiPassword,
+        checkIn,
+        checkOut
+    } = req.body;
+
+    const cleanCheckIn =
+        checkIn || null;
+    const cleanCheckOut =
+        checkOut || null;
+
+    if (
+        cleanCheckIn &&
+        cleanCheckOut &&
+        cleanCheckOut < cleanCheckIn
+    ) {
+
+        return res.status(400).json({
+            error: 'Check-out date cannot be before check-in date'
+        });
+
+    }
+
+    const cleanPassword =
+        (
+            wifiPassword ||
+            generateRoomPassword(roomId, cleanCheckIn)
+        ).trim();
+
+    if (!cleanPassword) {
+
+        return res.status(400).json({
+            error: 'WiFi password is required'
+        });
+
+    }
+
+    db.query(
+
+        `UPDATE rooms
+         SET wifi_password = ?,
+             check_in = ?,
+             check_out = ?,
+             device_limit =
+                COALESCE(default_device_limit, device_limit)
+         WHERE id = ?`,
+
+        [
+            cleanPassword,
+            cleanCheckIn,
+            cleanCheckOut,
+            roomId
+        ],
+
+        (err, result) => {
+
+            if (err) {
+
+                console.error(err);
+
+                return res.status(500).json({
+                    error: 'Database error'
+                });
+
+            }
+
+            if (result.affectedRows === 0) {
+
+                return res.status(404).json({
+                    error: 'Room not found'
+                });
+
+            }
+
+            console.log(
+                `[UPDATE] Room ${roomId} WiFi access updated`
+            );
+
+            res.json({
+                success: true,
+                roomId,
+                wifiPassword: cleanPassword,
+                checkIn: cleanCheckIn,
+                checkOut: cleanCheckOut
             });
 
         }
@@ -1449,6 +1915,16 @@ app.get('*', (req, res) => {
     );
 
 });
+
+setTimeout(
+    autoResetExpiredCheckouts,
+    8000
+);
+
+setInterval(
+    autoResetExpiredCheckouts,
+    60000
+);
 
 setInterval(() => {
 
