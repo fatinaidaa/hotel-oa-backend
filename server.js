@@ -424,8 +424,7 @@ function sendWhatsAppNotification(phoneNumber, status, roomId) {
 // ===== ROOM CREDENTIALS =====
 const roomCredentials = {
     101: { password: 'room101', limit: 3 },
-    102: { password: 'room102', limit: 3 },
-    103: { password: 'room103', limit: 2 }
+    102: { password: 'room102', limit: 3 }
 };
 
 // ===== API ROUTES =====
