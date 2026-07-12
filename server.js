@@ -564,8 +564,6 @@ app.post('/api/login', (req, res) => {
                         AND cr.mac_address IS NOT NULL
                         AND cr.mac_address <> ''
                         AND cr.mac_address <> 'unknown'
-                        AND cr.created_at >=
-                            DATE_SUB(NOW(), INTERVAL 10 MINUTE)
                     ) AS reserved_slots,
                     (
                         SELECT cr.id
@@ -574,8 +572,6 @@ app.post('/api/login', (req, res) => {
                         AND cr.mac_address = ?
                         AND cr.mac_address <> 'unknown'
                         AND cr.status = 'approved'
-                        AND cr.created_at >=
-                            DATE_SUB(NOW(), INTERVAL 10 MINUTE)
                         ORDER BY cr.id
                         LIMIT 1
                     ) AS approval_id,
@@ -586,8 +582,6 @@ app.post('/api/login', (req, res) => {
                         AND cr.mac_address = ?
                         AND cr.mac_address <> 'unknown'
                         AND cr.status = 'approved'
-                        AND cr.created_at >=
-                            DATE_SUB(NOW(), INTERVAL 10 MINUTE)
                         ORDER BY cr.id
                         LIMIT 1
                     ) AS approval_phone,
