@@ -1,94 +1,45 @@
-# Mesh Backend — Node.js + Express + MySQL
+# Hotel OA Backend
 
-## Setup
+Current active backend for the Hotel OA dashboard and ESP32 nodes.
+
+## Run
 
 ```bash
 npm install
+npm run dev
 ```
 
-Buat file `.env` (copy dari `.env` yang ada, isi password MySQL awak):
-```
-DB_PASSWORD=your_mysql_password
-```
-
-Jalankan `database.sql` dalam phpMyAdmin atau MySQL Workbench.
+For production:
 
 ```bash
-npm run dev    # development (auto-restart)
-npm start      # production
+npm start
 ```
 
----
+## Environment
 
-## API Endpoints
+Create a `.env` file when running locally:
 
-### Auth (Public)
-| Method | Endpoint | Body |
-|--------|----------|------|
-| POST | `/api/auth/signup` | `{ full_name, staff_id, password }` |
-| POST | `/api/auth/login`  | `{ staff_id, password }` → returns `{ user, token }` |
-
-### Rooms (Protected 🔒)
-| Method | Endpoint | Fungsi |
-|--------|----------|--------|
-| GET | `/api/rooms` | Semua rooms |
-| GET | `/api/rooms/:room_num` | Single room |
-| PUT | `/api/rooms/:room_num/limit` | `{ limit }` → update device limit |
-
-### Requests (Protected 🔒)
-| Method | Endpoint | Fungsi |
-|--------|----------|--------|
-| GET | `/api/requests` | Semua pending requests |
-| PUT | `/api/requests/:id/allow` | Approve request |
-| PUT | `/api/requests/:id/reject` | Reject request |
-
-### Sessions (Protected 🔒)
-| Method | Endpoint | Fungsi |
-|--------|----------|--------|
-| GET  | `/api/sessions/active` | Active connections |
-| POST | `/api/sessions/connect` | ESP32 call masa device connect |
-| POST | `/api/sessions/disconnect` | ESP32 call masa device disconnect |
-
-### Devices
-| Method | Endpoint | Auth | Fungsi |
-|--------|----------|------|--------|
-| POST | `/api/devices/request` | ❌ Public | User/ESP32 hantar request tambah device |
-| GET  | `/api/devices` | 🔒 | Semua registered devices |
-| DELETE | `/api/devices/:mac` | 🔒 | Remove device |
-
-### Health Check
-| Method | Endpoint |
-|--------|----------|
-| GET | `/api/health` |
-
----
-
-## ESP32 Integration
-
-### 1. User minta tambah device
-```
-POST http://192.168.4.1:3000/api/devices/request
-{
-  "room_num": 101,
-  "phone_num": "+60123456789",
-  "mac_address": "AA:BB:CC:DD:EE:FF"
-}
+```env
+DB_HOST=localhost
+DB_USER=root
+DB_PASSWORD=
+DB_NAME=wmn_project
+DB_PORT=3306
+PORT=3000
 ```
 
-### 2. Device connect (ESP32 → Backend)
-```
-POST http://192.168.4.1:3000/api/sessions/connect
-{
-  "room_num": 101,
-  "mac_address": "AA:BB:CC:DD:EE:FF"
-}
-```
+For deployment, use the public database connection configured in `server.js` or environment variables.
 
-### 3. Device disconnect
-```
-POST http://192.168.4.1:3000/api/sessions/disconnect
-{
-  "room_num": 101,
-  "mac_address": "AA:BB:CC:DD:EE:FF"
-}
-```
+## Main API groups
+
+- `/api/auth/*` - staff login and signup
+- `/api/rooms/*` - room status, limits, passwords, and stay dates
+- `/api/requests/*` - additional device approval/rejection
+- `/api/sessions/*` - active guest connections
+- `/api/nodes/*` - ESP32 node monitoring
+- `/api/login` - ESP32 captive portal login endpoint
+
+## Notes
+
+This project now uses the single-file backend in `server.js`.
+Old modular backend files such as `routes/`, `config/`, and `middleware/` have been removed because they were not used by the current system.

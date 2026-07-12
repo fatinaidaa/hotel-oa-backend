@@ -553,6 +553,8 @@ app.post('/api/login', (req, res) => {
                         FROM active_sessions a
                         WHERE a.room_id = r.id
                         AND a.status = 'connected'
+                        AND COALESCE(a.device_name, '') <> 'Mesh Node'
+                        AND COALESCE(a.mac_address, '') <> 'ESP32'
                     ) AS devices,
                     (
                         SELECT COUNT(*)
@@ -595,6 +597,8 @@ app.post('/api/login', (req, res) => {
                         WHERE a.room_id = r.id
                         AND a.mac_address = ?
                         AND a.status = 'connected'
+                        AND COALESCE(a.device_name, '') <> 'Mesh Node'
+                        AND COALESCE(a.mac_address, '') <> 'ESP32'
                     ) AS already_connected
                 FROM rooms r
                 WHERE r.id = ?
@@ -925,6 +929,25 @@ app.post('/api/request-device', (req, res) => {
                 `[REQUEST] New request from ${phoneNumber} for Room ${room}`
             );
 
+            if (mac && mac !== 'unknown') {
+                db.query(
+                    `UPDATE active_sessions
+                     SET status = 'disconnected'
+                     WHERE room_id = ?
+                     AND mac_address = ?
+                     AND status = 'connected'`,
+                    [room, mac],
+                    (sessionError) => {
+                        if (sessionError) {
+                            console.error(
+                                '[REQUEST] Active session cleanup error:',
+                                sessionError
+                            );
+                        }
+                    }
+                );
+            }
+
             sendTelegram(
 
             `📢 NEW DEVICE REQUEST
@@ -1032,6 +1055,8 @@ app.get('/api/rooms', (req, res) => {
         LEFT JOIN active_sessions a
             ON r.id = a.room_id
             AND a.status = 'connected'
+            AND COALESCE(a.device_name, '') <> 'Mesh Node'
+            AND COALESCE(a.mac_address, '') <> 'ESP32'
         GROUP BY r.id
         `,
 
@@ -1117,7 +1142,13 @@ app.get('/api/sessions/active', (req, res) => {
 
     db.query(
 
-        'SELECT * FROM active_sessions WHERE status = "connected"',
+        `
+        SELECT *
+        FROM active_sessions
+        WHERE status = "connected"
+        AND COALESCE(device_name, '') <> 'Mesh Node'
+        AND COALESCE(mac_address, '') <> 'ESP32'
+        `,
 
         (err, results) => {
 
@@ -1271,7 +1302,7 @@ app.put('/api/requests/:id/allow', (req, res) => {
 
             connection.query(
 
-                `SELECT room_id
+                `SELECT room_id, mac_address
                  FROM connection_requests
                  WHERE id = ?
                  AND status = 'pending'
@@ -1306,6 +1337,7 @@ app.put('/api/requests/:id/allow', (req, res) => {
                     }
 
                     const roomId = requests[0].room_id;
+                    const requestMac = requests[0].mac_address;
 
                     connection.query(
 
@@ -1357,7 +1389,9 @@ app.put('/api/requests/:id/allow', (req, res) => {
 
                                     }
 
-                                    connection.commit((commitError) => {
+                                    const commitApproval = () => {
+
+                                        connection.commit((commitError) => {
 
                                         if (commitError) {
 
@@ -1385,7 +1419,49 @@ app.put('/api/requests/:id/allow', (req, res) => {
                                             'Request approved and room limit increased'
                                         });
 
-                                    });
+                                        });
+
+                                    };
+
+                                    if (
+                                        requestMac &&
+                                        requestMac !== 'unknown'
+                                    ) {
+
+                                        return connection.query(
+
+                                            `UPDATE active_sessions
+                                             SET status = 'disconnected'
+                                             WHERE room_id = ?
+                                             AND mac_address = ?
+                                             AND status = 'connected'`,
+
+                                            [roomId, requestMac],
+
+                                            (sessionError) => {
+
+                                                if (sessionError) {
+
+                                                    return connection.rollback(() => {
+                                                        connection.release();
+                                                        console.error(sessionError);
+                                                        res.status(500).json({
+                                                            error:
+                                                            'Failed to approve request'
+                                                        });
+                                                    });
+
+                                                }
+
+                                                commitApproval();
+
+                                            }
+
+                                        );
+
+                                    }
+
+                                    commitApproval();
 
                                 }
 
@@ -1933,6 +2009,8 @@ setInterval(() => {
         SELECT *
         FROM active_sessions
         WHERE status = 'connected'
+        AND COALESCE(device_name, '') <> 'Mesh Node'
+        AND COALESCE(mac_address, '') <> 'ESP32'
         AND TIMESTAMPDIFF(SECOND, last_seen, NOW()) > 30
         `,
 
