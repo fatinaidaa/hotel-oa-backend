@@ -1570,12 +1570,163 @@ app.get('/api/nodes', (req, res) => {
 
 // Traffic
 app.get('/api/traffic', (req, res) => {
-    res.json([
-        { time: '08:00', usage: 20 },
-        { time: '09:00', usage: 35 },
-        { time: '10:00', usage: 50 },
-        { time: '11:00', usage: 42 }
-    ]);
+
+    const range = req.query.range || '1h';
+
+    const ranges = {
+        '1h': {
+            hours: 1,
+            points: 12
+        },
+        '6h': {
+            hours: 6,
+            points: 12
+        },
+        '24h': {
+            hours: 24,
+            points: 12
+        }
+    };
+
+    const selected = ranges[range] || ranges['1h'];
+    const stepMs =
+        (selected.hours * 60 * 60 * 1000) /
+        (selected.points - 1);
+
+    db.query(
+
+        `
+        SELECT
+            login_time,
+            last_seen,
+            status
+        FROM active_sessions
+        WHERE COALESCE(device_name, '') <> 'Mesh Node'
+        AND COALESCE(mac_address, '') <> 'ESP32'
+        AND (
+            status = 'connected'
+            OR last_seen >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+        )
+        `,
+
+        [selected.hours],
+
+        (sessionError, sessions) => {
+
+            if (sessionError) {
+
+                console.error(sessionError);
+
+                return res.status(500).json({
+                    error: 'Database error'
+                });
+
+            }
+
+            db.query(
+
+                `
+                SELECT
+                    COUNT(*) AS online_nodes,
+                    AVG(rssi) AS avg_rssi
+                FROM nodes
+                WHERE TIMESTAMPDIFF(SECOND, last_seen, NOW()) <= 30
+                `,
+
+                (nodeError, nodeRows) => {
+
+                    if (nodeError) {
+
+                        console.error(nodeError);
+
+                        return res.status(500).json({
+                            error: 'Database error'
+                        });
+
+                    }
+
+                    const now = new Date();
+                    const onlineNodes =
+                        Number(nodeRows[0]?.online_nodes || 0);
+                    const avgRssi =
+                        Number(nodeRows[0]?.avg_rssi || -80);
+
+                    let signalFactor = 0.3;
+
+                    if (avgRssi >= -50) {
+                        signalFactor = 1.0;
+                    } else if (avgRssi >= -60) {
+                        signalFactor = 0.8;
+                    } else if (avgRssi >= -70) {
+                        signalFactor = 0.55;
+                    }
+
+                    if (onlineNodes === 0) {
+                        signalFactor = 0;
+                    }
+
+                    const data = [];
+
+                    for (
+                        let index = 0;
+                        index < selected.points;
+                        index++
+                    ) {
+
+                        const pointTime = new Date(
+                            now.getTime() -
+                            stepMs * (selected.points - 1 - index)
+                        );
+
+                        const connectedUsers = sessions.filter(session => {
+
+                            const loginTime =
+                                new Date(session.login_time);
+                            const lastSeen =
+                                new Date(session.last_seen);
+
+                            return (
+                                loginTime <= pointTime &&
+                                (
+                                    session.status === 'connected' ||
+                                    lastSeen >= pointTime
+                                )
+                            );
+
+                        }).length;
+
+                        const download =
+                            connectedUsers * 2.0 * signalFactor;
+                        const upload =
+                            connectedUsers * 0.8 * signalFactor;
+
+                        data.push({
+                            time: pointTime.toLocaleTimeString(
+                                'en-MY',
+                                {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    hour12: false
+                                }
+                            ),
+                            download: Number(download.toFixed(1)),
+                            upload: Number(upload.toFixed(1)),
+                            connectedUsers,
+                            onlineNodes
+                        });
+
+                    }
+
+                    res.json(data);
+
+                }
+
+            );
+
+        }
+
+    );
+
 });
 
 // 7. Update room limit (Railway DB)
