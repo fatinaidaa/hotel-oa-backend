@@ -551,6 +551,293 @@ const roomCredentials = {
     102: { password: 'room102', limit: 3 }
 };
 
+function toNumber(value) {
+
+    const numberValue = Number(value);
+
+    return Number.isFinite(numberValue)
+        ? numberValue
+        : null;
+
+}
+
+function getWorstSeverity(current, next) {
+
+    const order = {
+        good: 0,
+        warning: 1,
+        critical: 2
+    };
+
+    return order[next] > order[current]
+        ? next
+        : current;
+
+}
+
+function buildNetworkInsight(nodes, metrics) {
+
+    const metricsByNode =
+        new Map(
+            metrics.map((metric) => [
+                metric.node_id,
+                metric
+            ])
+        );
+
+    let severity = 'good';
+    const findings = [];
+    const recommendations = [];
+
+    const rooms =
+        nodes.map((node) => {
+
+            const metric =
+                metricsByNode.get(node.node_id) || {};
+
+            const rssi =
+                toNumber(node.rssi);
+            const latency =
+                toNumber(metric.wifi_latency_ms ?? node.wifi_latency_ms);
+            const jitter =
+                toNumber(metric.wifi_jitter_ms ?? node.wifi_jitter_ms);
+            const packetLoss =
+                toNumber(metric.wifi_packet_loss ?? node.wifi_packet_loss);
+            const successRate =
+                toNumber(metric.wifi_success_rate ?? node.wifi_success_rate);
+            const roomId =
+                node.room_id || metric.room_id || 'Unknown';
+            const roomLabel =
+                `Room ${roomId}`;
+
+            let roomSeverity = 'good';
+            const roomIssues = [];
+
+            if (node.status === 'offline') {
+
+                roomSeverity = 'critical';
+                roomIssues.push('ESP32 monitor node is offline');
+                findings.push(`${roomLabel}: monitor node is offline.`);
+                recommendations.push(
+                    `${roomLabel}: check ESP32 power supply and WiFi connection.`
+                );
+
+            }
+
+            if (rssi !== null && rssi < -70) {
+
+                roomSeverity =
+                    getWorstSeverity(roomSeverity, 'critical');
+                roomIssues.push('weak WiFi signal');
+                findings.push(
+                    `${roomLabel}: weak RSSI detected (${rssi} dBm).`
+                );
+                recommendations.push(
+                    `${roomLabel}: move the router/access point closer or reduce wall obstruction.`
+                );
+
+            } else if (rssi !== null && rssi < -60) {
+
+                roomSeverity =
+                    getWorstSeverity(roomSeverity, 'warning');
+                roomIssues.push('fair WiFi signal');
+                findings.push(
+                    `${roomLabel}: RSSI is fair (${rssi} dBm).`
+                );
+                recommendations.push(
+                    `${roomLabel}: monitor signal quality and consider repositioning the node/router if latency increases.`
+                );
+
+            }
+
+            if (latency !== null && latency > 80) {
+
+                roomSeverity =
+                    getWorstSeverity(roomSeverity, 'critical');
+                roomIssues.push('high WiFi latency');
+                findings.push(
+                    `${roomLabel}: high WiFi latency detected (${latency} ms).`
+                );
+                recommendations.push(
+                    `${roomLabel}: check router load, interference, and distance from access point.`
+                );
+
+            } else if (latency !== null && latency > 30) {
+
+                roomSeverity =
+                    getWorstSeverity(roomSeverity, 'warning');
+                roomIssues.push('increased WiFi latency');
+                findings.push(
+                    `${roomLabel}: WiFi latency is higher than normal (${latency} ms).`
+                );
+
+            }
+
+            if (jitter !== null && jitter > 30) {
+
+                roomSeverity =
+                    getWorstSeverity(roomSeverity, 'critical');
+                roomIssues.push('unstable latency/jitter');
+                findings.push(
+                    `${roomLabel}: high jitter detected (${jitter} ms).`
+                );
+                recommendations.push(
+                    `${roomLabel}: reduce WiFi interference or avoid placing the node near electronic devices.`
+                );
+
+            } else if (jitter !== null && jitter > 15) {
+
+                roomSeverity =
+                    getWorstSeverity(roomSeverity, 'warning');
+                roomIssues.push('moderate jitter');
+                findings.push(
+                    `${roomLabel}: jitter is moderate (${jitter} ms).`
+                );
+
+            }
+
+            if (packetLoss !== null && packetLoss > 5) {
+
+                roomSeverity =
+                    getWorstSeverity(roomSeverity, 'critical');
+                roomIssues.push('packet loss detected');
+                findings.push(
+                    `${roomLabel}: packet loss is high (${packetLoss}%).`
+                );
+                recommendations.push(
+                    `${roomLabel}: inspect WiFi coverage and router stability because packets are being dropped.`
+                );
+
+            } else if (packetLoss !== null && packetLoss > 0) {
+
+                roomSeverity =
+                    getWorstSeverity(roomSeverity, 'warning');
+                roomIssues.push('minor packet loss');
+                findings.push(
+                    `${roomLabel}: minor packet loss detected (${packetLoss}%).`
+                );
+
+            }
+
+            if (successRate !== null && successRate < 95) {
+
+                roomSeverity =
+                    getWorstSeverity(roomSeverity, 'critical');
+                roomIssues.push('low success rate');
+                findings.push(
+                    `${roomLabel}: success rate is low (${successRate}%).`
+                );
+
+            } else if (successRate !== null && successRate < 99) {
+
+                roomSeverity =
+                    getWorstSeverity(roomSeverity, 'warning');
+                roomIssues.push('reduced success rate');
+                findings.push(
+                    `${roomLabel}: success rate dropped to ${successRate}%.`
+                );
+
+            }
+
+            severity =
+                getWorstSeverity(severity, roomSeverity);
+
+            return {
+                roomId,
+                nodeId: node.node_id,
+                severity: roomSeverity,
+                issues: roomIssues,
+                rssi,
+                latency,
+                jitter,
+                packetLoss,
+                successRate
+            };
+
+        });
+
+    if (findings.length === 0) {
+
+        findings.push(
+            'All monitored rooms show stable WiFi performance.'
+        );
+        recommendations.push(
+            'No immediate action required. Continue monitoring room performance trends.'
+        );
+
+    }
+
+    const uniqueRecommendations =
+        [...new Set(recommendations)].slice(0, 5);
+
+    const summary =
+        severity === 'critical'
+            ? 'Critical network issue detected in at least one monitored room.'
+            : severity === 'warning'
+                ? 'Network performance is usable, but some rooms need attention.'
+                : 'Network performance is stable across monitored rooms.';
+
+    return {
+        severity,
+        summary,
+        findings: findings.slice(0, 6),
+        recommendations: uniqueRecommendations,
+        rooms,
+        method: 'rule_based',
+        generatedAt: new Date().toISOString()
+    };
+
+}
+
+async function improveInsightWithOllama(insight) {
+
+    const ollamaUrl = process.env.OLLAMA_URL;
+
+    if (!ollamaUrl) {
+        return insight;
+    }
+
+    try {
+
+        const response =
+            await axios.post(
+                `${ollamaUrl}/api/generate`,
+                {
+                    model: process.env.OLLAMA_MODEL || 'llama3.2',
+                    stream: false,
+                    prompt:
+                        `You are an assistant for a hotel WiFi monitoring dashboard.
+Summarize this network condition for hotel staff in 2 short sentences and give 3 practical actions.
+Use simple English.
+
+Data:
+${JSON.stringify(insight, null, 2)}`
+                },
+                {
+                    timeout: 8000
+                }
+            );
+
+        return {
+            ...insight,
+            aiExplanation:
+                response.data?.response?.trim() || null,
+            method: 'ollama'
+        };
+
+    } catch (err) {
+
+        console.error(
+            '[AI INSIGHT] Ollama unavailable, using fallback:',
+            err.message
+        );
+
+        return insight;
+
+    }
+
+}
+
 // ===== API ROUTES =====
 app.post('/api/node-report', (req, res) => {
 
@@ -1864,6 +2151,80 @@ app.get('/api/traffic', (req, res) => {
             }
 
             res.json(results);
+
+        }
+
+    );
+
+});
+
+// AI Network Insight
+app.get('/api/ai/network-insight', (req, res) => {
+
+    db.query(
+
+        `
+        SELECT
+            *,
+            CASE
+                WHEN TIMESTAMPDIFF(SECOND, last_seen, NOW()) > 30
+                THEN 'offline'
+                ELSE 'online'
+            END AS status
+        FROM nodes
+        ORDER BY room_id
+        `,
+
+        (nodesError, nodes) => {
+
+            if (nodesError) {
+
+                console.error(nodesError);
+
+                return res.status(500).json({
+                    error: 'Database error'
+                });
+
+            }
+
+            db.query(
+
+                `
+                SELECT
+                    node_id,
+                    room_id,
+                    ROUND(AVG(wifi_latency_ms), 1) AS wifi_latency_ms,
+                    ROUND(AVG(wifi_jitter_ms), 1) AS wifi_jitter_ms,
+                    ROUND(AVG(wifi_packet_loss), 1) AS wifi_packet_loss,
+                    ROUND(AVG(wifi_success_rate), 1) AS wifi_success_rate
+                FROM node_metrics
+                WHERE created_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)
+                  AND wifi_latency_ms IS NOT NULL
+                GROUP BY node_id, room_id
+                `,
+
+                async (metricsError, metrics) => {
+
+                    if (metricsError) {
+
+                        console.error(metricsError);
+
+                        return res.status(500).json({
+                            error: 'Database error'
+                        });
+
+                    }
+
+                    const insight =
+                        buildNetworkInsight(nodes, metrics);
+                    const improvedInsight =
+                        await improveInsightWithOllama(insight);
+
+                    res.json(improvedInsight);
+
+                }
+
+            );
 
         }
 
