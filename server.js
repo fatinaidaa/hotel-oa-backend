@@ -1824,7 +1824,13 @@ app.get('/api/traffic', (req, res) => {
 
         `
         SELECT
-            DATE_FORMAT(MIN(created_at), '%H:%i') AS time,
+            DATE_FORMAT(
+                MIN(COALESCE(
+                    CONVERT_TZ(created_at, '+00:00', '+08:00'),
+                    DATE_ADD(created_at, INTERVAL 8 HOUR)
+                )),
+                '%l:%i %p'
+            ) AS time,
             ROUND(AVG(wifi_latency_ms), 1) AS latency,
             ROUND(AVG(wifi_jitter_ms), 1) AS jitter,
             ROUND(AVG(wifi_packet_loss), 1) AS packetLoss,
@@ -1832,7 +1838,13 @@ app.get('/api/traffic', (req, res) => {
         FROM node_metrics
         WHERE created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
           AND wifi_latency_ms IS NOT NULL
-        GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d %H:%i')
+        GROUP BY DATE_FORMAT(
+            COALESCE(
+                CONVERT_TZ(created_at, '+00:00', '+08:00'),
+                DATE_ADD(created_at, INTERVAL 8 HOUR)
+            ),
+            '%Y-%m-%d %H:%i'
+        )
         ORDER BY MIN(created_at)
         LIMIT 120
         `,
