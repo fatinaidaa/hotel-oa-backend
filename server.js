@@ -139,6 +139,30 @@ ensureColumn(
     'DECIMAL(5,2) NULL'
 );
 
+ensureColumn(
+    'nodes',
+    'wifi_latency_ms',
+    'INT NULL'
+);
+
+ensureColumn(
+    'nodes',
+    'wifi_jitter_ms',
+    'INT NULL'
+);
+
+ensureColumn(
+    'nodes',
+    'wifi_packet_loss',
+    'DECIMAL(5,2) NULL'
+);
+
+ensureColumn(
+    'nodes',
+    'wifi_success_rate',
+    'DECIMAL(5,2) NULL'
+);
+
 db.query(`
 CREATE TABLE IF NOT EXISTS node_metrics (
 
@@ -160,6 +184,14 @@ CREATE TABLE IF NOT EXISTS node_metrics (
 
     success_rate DECIMAL(5,2),
 
+    wifi_latency_ms INT,
+
+    wifi_jitter_ms INT,
+
+    wifi_packet_loss DECIMAL(5,2),
+
+    wifi_success_rate DECIMAL(5,2),
+
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
     INDEX idx_node_metrics_created_at (created_at),
@@ -180,6 +212,30 @@ CREATE TABLE IF NOT EXISTS node_metrics (
     }
 
     console.log('[DB] node_metrics table ready!');
+
+    ensureColumn(
+        'node_metrics',
+        'wifi_latency_ms',
+        'INT NULL'
+    );
+
+    ensureColumn(
+        'node_metrics',
+        'wifi_jitter_ms',
+        'INT NULL'
+    );
+
+    ensureColumn(
+        'node_metrics',
+        'wifi_packet_loss',
+        'DECIMAL(5,2) NULL'
+    );
+
+    ensureColumn(
+        'node_metrics',
+        'wifi_success_rate',
+        'DECIMAL(5,2) NULL'
+    );
 
 });
 
@@ -509,7 +565,11 @@ app.post('/api/node-report', (req, res) => {
         latencyMs,
         jitterMs,
         packetLoss,
-        successRate
+        successRate,
+        wifiLatencyMs,
+        wifiJitterMs,
+        wifiPacketLoss,
+        wifiSuccessRate
     } = req.body;
 
     const measuredLatency =
@@ -528,6 +588,22 @@ app.post('/api/node-report', (req, res) => {
         Number.isFinite(Number(successRate))
             ? Number(successRate)
             : null;
+    const measuredWifiLatency =
+        Number.isFinite(Number(wifiLatencyMs))
+            ? Number(wifiLatencyMs)
+            : measuredLatency;
+    const measuredWifiJitter =
+        Number.isFinite(Number(wifiJitterMs))
+            ? Number(wifiJitterMs)
+            : measuredJitter;
+    const measuredWifiPacketLoss =
+        Number.isFinite(Number(wifiPacketLoss))
+            ? Number(wifiPacketLoss)
+            : measuredPacketLoss;
+    const measuredWifiSuccessRate =
+        Number.isFinite(Number(wifiSuccessRate))
+            ? Number(wifiSuccessRate)
+            : measuredSuccessRate;
 
     db.query(
 
@@ -543,10 +619,14 @@ app.post('/api/node-report', (req, res) => {
             latency_ms,
             jitter_ms,
             packet_loss,
-            success_rate
+            success_rate,
+            wifi_latency_ms,
+            wifi_jitter_ms,
+            wifi_packet_loss,
+            wifi_success_rate
         )
 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 
         ON DUPLICATE KEY UPDATE
 
@@ -560,6 +640,10 @@ app.post('/api/node-report', (req, res) => {
             jitter_ms = VALUES(jitter_ms),
             packet_loss = VALUES(packet_loss),
             success_rate = VALUES(success_rate),
+            wifi_latency_ms = VALUES(wifi_latency_ms),
+            wifi_jitter_ms = VALUES(wifi_jitter_ms),
+            wifi_packet_loss = VALUES(wifi_packet_loss),
+            wifi_success_rate = VALUES(wifi_success_rate),
             last_seen = NOW()
         `,
 
@@ -574,7 +658,11 @@ app.post('/api/node-report', (req, res) => {
             measuredLatency,
             measuredJitter,
             measuredPacketLoss,
-            measuredSuccessRate
+            measuredSuccessRate,
+            measuredWifiLatency,
+            measuredWifiJitter,
+            measuredWifiPacketLoss,
+            measuredWifiSuccessRate
         ],
 
         (err) => {
@@ -600,9 +688,13 @@ app.post('/api/node-report', (req, res) => {
                     latency_ms,
                     jitter_ms,
                     packet_loss,
-                    success_rate
+                    success_rate,
+                    wifi_latency_ms,
+                    wifi_jitter_ms,
+                    wifi_packet_loss,
+                    wifi_success_rate
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 
                 [
                     nodeId,
@@ -612,7 +704,11 @@ app.post('/api/node-report', (req, res) => {
                     measuredLatency,
                     measuredJitter,
                     measuredPacketLoss,
-                    measuredSuccessRate
+                    measuredSuccessRate,
+                    measuredWifiLatency,
+                    measuredWifiJitter,
+                    measuredWifiPacketLoss,
+                    measuredWifiSuccessRate
                 ],
 
                 (metricError) => {
@@ -1729,12 +1825,13 @@ app.get('/api/traffic', (req, res) => {
         `
         SELECT
             DATE_FORMAT(MIN(created_at), '%H:%i') AS time,
-            ROUND(AVG(latency_ms), 1) AS latency,
-            ROUND(AVG(jitter_ms), 1) AS jitter,
-            ROUND(AVG(packet_loss), 1) AS packetLoss,
-            ROUND(AVG(success_rate), 1) AS successRate
+            ROUND(AVG(wifi_latency_ms), 1) AS latency,
+            ROUND(AVG(wifi_jitter_ms), 1) AS jitter,
+            ROUND(AVG(wifi_packet_loss), 1) AS packetLoss,
+            ROUND(AVG(wifi_success_rate), 1) AS successRate
         FROM node_metrics
         WHERE created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+          AND wifi_latency_ms IS NOT NULL
         GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d %H:%i')
         ORDER BY MIN(created_at)
         LIMIT 120
