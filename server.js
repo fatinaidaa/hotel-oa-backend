@@ -115,6 +115,82 @@ ensureColumn(
     'INT NULL'
 );
 
+ensureColumn(
+    'nodes',
+    'latency_ms',
+    'INT NULL'
+);
+
+ensureColumn(
+    'nodes',
+    'jitter_ms',
+    'INT NULL'
+);
+
+ensureColumn(
+    'nodes',
+    'packet_loss',
+    'DECIMAL(5,2) NULL'
+);
+
+ensureColumn(
+    'nodes',
+    'success_rate',
+    'DECIMAL(5,2) NULL'
+);
+
+ensureColumn(
+    'nodes',
+    'estimated_throughput',
+    'DECIMAL(6,2) NULL'
+);
+
+db.query(`
+CREATE TABLE IF NOT EXISTS node_metrics (
+
+    id INT AUTO_INCREMENT PRIMARY KEY,
+
+    node_id VARCHAR(100),
+
+    room_id INT,
+
+    rssi INT,
+
+    signal_quality VARCHAR(50),
+
+    latency_ms INT,
+
+    jitter_ms INT,
+
+    packet_loss DECIMAL(5,2),
+
+    success_rate DECIMAL(5,2),
+
+    estimated_throughput DECIMAL(6,2),
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    INDEX idx_node_metrics_created_at (created_at),
+
+    INDEX idx_node_metrics_node_id (node_id),
+
+    INDEX idx_node_metrics_room_id (room_id)
+
+)
+`, (err) => {
+
+    if (err) {
+        console.error(
+            '[DB] node_metrics table creation failed:',
+            err
+        );
+        return;
+    }
+
+    console.log('[DB] node_metrics table ready!');
+
+});
+
 setTimeout(() => {
 
     db.query(
@@ -437,8 +513,34 @@ app.post('/api/node-report', (req, res) => {
         signalQuality,
         ip,
         uptime,
-        status
+        status,
+        latencyMs,
+        jitterMs,
+        packetLoss,
+        successRate,
+        estimatedThroughput
     } = req.body;
+
+    const measuredLatency =
+        Number.isFinite(Number(latencyMs))
+            ? Number(latencyMs)
+            : null;
+    const measuredJitter =
+        Number.isFinite(Number(jitterMs))
+            ? Number(jitterMs)
+            : null;
+    const measuredPacketLoss =
+        Number.isFinite(Number(packetLoss))
+            ? Number(packetLoss)
+            : null;
+    const measuredSuccessRate =
+        Number.isFinite(Number(successRate))
+            ? Number(successRate)
+            : null;
+    const measuredThroughput =
+        Number.isFinite(Number(estimatedThroughput))
+            ? Number(estimatedThroughput)
+            : null;
 
     db.query(
 
@@ -450,10 +552,15 @@ app.post('/api/node-report', (req, res) => {
             signal_quality,
             ip_address,
             uptime,
-            status
+            status,
+            latency_ms,
+            jitter_ms,
+            packet_loss,
+            success_rate,
+            estimated_throughput
         )
 
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 
         ON DUPLICATE KEY UPDATE
 
@@ -463,6 +570,11 @@ app.post('/api/node-report', (req, res) => {
             ip_address = VALUES(ip_address),
             uptime = VALUES(uptime),
             status = VALUES(status),
+            latency_ms = VALUES(latency_ms),
+            jitter_ms = VALUES(jitter_ms),
+            packet_loss = VALUES(packet_loss),
+            success_rate = VALUES(success_rate),
+            estimated_throughput = VALUES(estimated_throughput),
             last_seen = NOW()
         `,
 
@@ -473,7 +585,12 @@ app.post('/api/node-report', (req, res) => {
             signalQuality,
             ip,
             uptime,
-            status
+            status,
+            measuredLatency,
+            measuredJitter,
+            measuredPacketLoss,
+            measuredSuccessRate,
+            measuredThroughput
         ],
 
         (err) => {
@@ -488,13 +605,63 @@ app.post('/api/node-report', (req, res) => {
 
             }
 
-            res.json({
-                success: true
-            });
+            db.query(
+
+                `INSERT INTO node_metrics
+                (
+                    node_id,
+                    room_id,
+                    rssi,
+                    signal_quality,
+                    latency_ms,
+                    jitter_ms,
+                    packet_loss,
+                    success_rate,
+                    estimated_throughput
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+
+                [
+                    nodeId,
+                    room,
+                    rssi,
+                    signalQuality,
+                    measuredLatency,
+                    measuredJitter,
+                    measuredPacketLoss,
+                    measuredSuccessRate,
+                    measuredThroughput
+                ],
+
+                (metricError) => {
+
+                    if (metricError) {
+                        console.error(
+                            '[NODE METRIC] Insert failed:',
+                            metricError
+                        );
+                    }
+
+                    res.json({
+                        success: true
+                    });
+
+                }
+
+            );
 
         }
 
     );
+
+});
+
+app.get('/api/health', (req, res) => {
+
+    res.json({
+        success: true,
+        timestamp: new Date().toISOString()
+    });
 
 });
 
@@ -1562,54 +1729,43 @@ app.get('/api/nodes', (req, res) => {
 
 });
 
-// Traffic
+// Network Performance
 app.get('/api/traffic', (req, res) => {
 
     const range = req.query.range || '1h';
 
     const ranges = {
-        '1h': {
-            hours: 1,
-            points: 12
-        },
-        '6h': {
-            hours: 6,
-            points: 12
-        },
-        '24h': {
-            hours: 24,
-            points: 12
-        }
+        '1h': 1,
+        '6h': 6,
+        '24h': 24
     };
 
-    const selected = ranges[range] || ranges['1h'];
-    const stepMs =
-        (selected.hours * 60 * 60 * 1000) /
-        (selected.points - 1);
+    const selectedHours = ranges[range] || ranges['1h'];
 
     db.query(
 
         `
         SELECT
-            login_time,
-            last_seen,
-            status
-        FROM active_sessions
-        WHERE COALESCE(device_name, '') <> 'Mesh Node'
-        AND COALESCE(mac_address, '') <> 'ESP32'
-        AND (
-            status = 'connected'
-            OR last_seen >= DATE_SUB(NOW(), INTERVAL ? HOUR)
-        )
+            DATE_FORMAT(created_at, '%H:%i') AS time,
+            ROUND(AVG(latency_ms), 1) AS latency,
+            ROUND(AVG(jitter_ms), 1) AS jitter,
+            ROUND(AVG(packet_loss), 1) AS packetLoss,
+            ROUND(AVG(success_rate), 1) AS successRate,
+            ROUND(AVG(estimated_throughput), 1) AS estimatedThroughput
+        FROM node_metrics
+        WHERE created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+        GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d %H:%i')
+        ORDER BY MIN(created_at)
+        LIMIT 120
         `,
 
-        [selected.hours],
+        [selectedHours],
 
-        (sessionError, sessions) => {
+        (err, results) => {
 
-            if (sessionError) {
+            if (err) {
 
-                console.error(sessionError);
+                console.error(err);
 
                 return res.status(500).json({
                     error: 'Database error'
@@ -1617,105 +1773,7 @@ app.get('/api/traffic', (req, res) => {
 
             }
 
-            db.query(
-
-                `
-                SELECT
-                    COUNT(*) AS online_nodes,
-                    AVG(rssi) AS avg_rssi
-                FROM nodes
-                WHERE TIMESTAMPDIFF(SECOND, last_seen, NOW()) <= 30
-                `,
-
-                (nodeError, nodeRows) => {
-
-                    if (nodeError) {
-
-                        console.error(nodeError);
-
-                        return res.status(500).json({
-                            error: 'Database error'
-                        });
-
-                    }
-
-                    const now = new Date();
-                    const onlineNodes =
-                        Number(nodeRows[0]?.online_nodes || 0);
-                    const avgRssi =
-                        Number(nodeRows[0]?.avg_rssi || -80);
-
-                    let signalFactor = 0.3;
-
-                    if (avgRssi >= -50) {
-                        signalFactor = 1.0;
-                    } else if (avgRssi >= -60) {
-                        signalFactor = 0.8;
-                    } else if (avgRssi >= -70) {
-                        signalFactor = 0.55;
-                    }
-
-                    if (onlineNodes === 0) {
-                        signalFactor = 0;
-                    }
-
-                    const data = [];
-
-                    for (
-                        let index = 0;
-                        index < selected.points;
-                        index++
-                    ) {
-
-                        const pointTime = new Date(
-                            now.getTime() -
-                            stepMs * (selected.points - 1 - index)
-                        );
-
-                        const connectedUsers = sessions.filter(session => {
-
-                            const loginTime =
-                                new Date(session.login_time);
-                            const lastSeen =
-                                new Date(session.last_seen);
-
-                            return (
-                                loginTime <= pointTime &&
-                                (
-                                    session.status === 'connected' ||
-                                    lastSeen >= pointTime
-                                )
-                            );
-
-                        }).length;
-
-                        const download =
-                            connectedUsers * 2.0 * signalFactor;
-                        const upload =
-                            connectedUsers * 0.8 * signalFactor;
-
-                        data.push({
-                            time: pointTime.toLocaleTimeString(
-                                'en-MY',
-                                {
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                    hour12: false
-                                }
-                            ),
-                            download: Number(download.toFixed(1)),
-                            upload: Number(upload.toFixed(1)),
-                            connectedUsers,
-                            onlineNodes
-                        });
-
-                    }
-
-                    res.json(data);
-
-                }
-
-            );
+            res.json(results);
 
         }
 
