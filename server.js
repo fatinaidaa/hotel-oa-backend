@@ -1746,7 +1746,7 @@ app.get('/api/traffic', (req, res) => {
 
         `
         SELECT
-            DATE_FORMAT(created_at, '%H:%i') AS time,
+            DATE_FORMAT(MIN(created_at), '%H:%i') AS time,
             ROUND(AVG(latency_ms), 1) AS latency,
             ROUND(AVG(jitter_ms), 1) AS jitter,
             ROUND(AVG(packet_loss), 1) AS packetLoss,
