@@ -139,12 +139,6 @@ ensureColumn(
     'DECIMAL(5,2) NULL'
 );
 
-ensureColumn(
-    'nodes',
-    'estimated_throughput',
-    'DECIMAL(6,2) NULL'
-);
-
 db.query(`
 CREATE TABLE IF NOT EXISTS node_metrics (
 
@@ -165,8 +159,6 @@ CREATE TABLE IF NOT EXISTS node_metrics (
     packet_loss DECIMAL(5,2),
 
     success_rate DECIMAL(5,2),
-
-    estimated_throughput DECIMAL(6,2),
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
@@ -517,8 +509,7 @@ app.post('/api/node-report', (req, res) => {
         latencyMs,
         jitterMs,
         packetLoss,
-        successRate,
-        estimatedThroughput
+        successRate
     } = req.body;
 
     const measuredLatency =
@@ -537,10 +528,6 @@ app.post('/api/node-report', (req, res) => {
         Number.isFinite(Number(successRate))
             ? Number(successRate)
             : null;
-    const measuredThroughput =
-        Number.isFinite(Number(estimatedThroughput))
-            ? Number(estimatedThroughput)
-            : null;
 
     db.query(
 
@@ -556,11 +543,10 @@ app.post('/api/node-report', (req, res) => {
             latency_ms,
             jitter_ms,
             packet_loss,
-            success_rate,
-            estimated_throughput
+            success_rate
         )
 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 
         ON DUPLICATE KEY UPDATE
 
@@ -574,7 +560,6 @@ app.post('/api/node-report', (req, res) => {
             jitter_ms = VALUES(jitter_ms),
             packet_loss = VALUES(packet_loss),
             success_rate = VALUES(success_rate),
-            estimated_throughput = VALUES(estimated_throughput),
             last_seen = NOW()
         `,
 
@@ -589,8 +574,7 @@ app.post('/api/node-report', (req, res) => {
             measuredLatency,
             measuredJitter,
             measuredPacketLoss,
-            measuredSuccessRate,
-            measuredThroughput
+            measuredSuccessRate
         ],
 
         (err) => {
@@ -616,10 +600,9 @@ app.post('/api/node-report', (req, res) => {
                     latency_ms,
                     jitter_ms,
                     packet_loss,
-                    success_rate,
-                    estimated_throughput
+                    success_rate
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 
                 [
                     nodeId,
@@ -629,8 +612,7 @@ app.post('/api/node-report', (req, res) => {
                     measuredLatency,
                     measuredJitter,
                     measuredPacketLoss,
-                    measuredSuccessRate,
-                    measuredThroughput
+                    measuredSuccessRate
                 ],
 
                 (metricError) => {
@@ -1750,8 +1732,7 @@ app.get('/api/traffic', (req, res) => {
             ROUND(AVG(latency_ms), 1) AS latency,
             ROUND(AVG(jitter_ms), 1) AS jitter,
             ROUND(AVG(packet_loss), 1) AS packetLoss,
-            ROUND(AVG(success_rate), 1) AS successRate,
-            ROUND(AVG(estimated_throughput), 1) AS estimatedThroughput
+            ROUND(AVG(success_rate), 1) AS successRate
         FROM node_metrics
         WHERE created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
         GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d %H:%i')
