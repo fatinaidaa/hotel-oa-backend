@@ -838,6 +838,128 @@ ${JSON.stringify(insight, null, 2)}`
 
 }
 
+function buildAdditionalConnectionSuggestion(request) {
+
+    const currentConnections =
+        toNumber(request.current_connections) || 0;
+    const deviceLimit =
+        toNumber(request.device_limit) || 0;
+    const rssi =
+        toNumber(request.rssi);
+    const latency =
+        toNumber(request.wifi_latency_ms);
+    const jitter =
+        toNumber(request.wifi_jitter_ms);
+    const packetLoss =
+        toNumber(request.wifi_packet_loss);
+    const successRate =
+        toNumber(request.wifi_success_rate);
+    const nodeStatus =
+        request.node_status || 'unknown';
+
+    const reasons = [];
+    const warnings = [];
+
+    if (nodeStatus !== 'online') {
+        warnings.push('Room monitor node is offline, so current WiFi quality cannot be verified.');
+    }
+
+    if (rssi !== null && rssi < -70) {
+        reasons.push(`Weak WiFi signal (${rssi} dBm).`);
+    } else if (rssi !== null && rssi < -60) {
+        warnings.push(`Signal is only fair (${rssi} dBm).`);
+    }
+
+    if (latency !== null && latency > 80) {
+        reasons.push(`High WiFi latency (${latency} ms).`);
+    } else if (latency !== null && latency > 30) {
+        warnings.push(`Latency is higher than ideal (${latency} ms).`);
+    }
+
+    if (jitter !== null && jitter > 30) {
+        reasons.push(`High jitter (${jitter} ms), indicating unstable WiFi.`);
+    } else if (jitter !== null && jitter > 15) {
+        warnings.push(`Jitter is moderate (${jitter} ms).`);
+    }
+
+    if (packetLoss !== null && packetLoss > 5) {
+        reasons.push(`High packet loss (${packetLoss}%).`);
+    } else if (packetLoss !== null && packetLoss > 0) {
+        warnings.push(`Minor packet loss detected (${packetLoss}%).`);
+    }
+
+    if (successRate !== null && successRate < 95) {
+        reasons.push(`Low success rate (${successRate}%).`);
+    } else if (successRate !== null && successRate < 99) {
+        warnings.push(`Success rate is slightly reduced (${successRate}%).`);
+    }
+
+    if (
+        latency === null &&
+        jitter === null &&
+        packetLoss === null &&
+        successRate === null
+    ) {
+        warnings.push('No recent WiFi performance data is available for this room.');
+    }
+
+    if (currentConnections > deviceLimit) {
+        warnings.push(
+            `Room already has ${currentConnections} connected devices, above the current limit of ${deviceLimit}.`
+        );
+    }
+
+    if (reasons.length > 0) {
+
+        return {
+            decision: 'reject',
+            label: 'AI suggests reject',
+            severity: 'critical',
+            confidence: 'High',
+            summary:
+                'The room network condition is not suitable for an additional device right now.',
+            reasons,
+            currentConnections,
+            deviceLimit,
+            projectedLimit: deviceLimit + 1
+        };
+
+    }
+
+    if (warnings.length > 0) {
+
+        return {
+            decision: 'review',
+            label: 'AI suggests review',
+            severity: 'warning',
+            confidence: 'Medium',
+            summary:
+                'The request can be considered, but staff should review the room network condition first.',
+            reasons: warnings,
+            currentConnections,
+            deviceLimit,
+            projectedLimit: deviceLimit + 1
+        };
+
+    }
+
+    return {
+        decision: 'approve',
+        label: 'AI suggests approve',
+        severity: 'good',
+        confidence: 'High',
+        summary:
+            'The room network is stable and can support one additional device.',
+        reasons: [
+            'Signal, latency, jitter, packet loss, and success rate are within acceptable range.'
+        ],
+        currentConnections,
+        deviceLimit,
+        projectedLimit: deviceLimit + 1
+    };
+
+}
+
 // ===== API ROUTES =====
 app.post('/api/node-report', (req, res) => {
 
@@ -1770,9 +1892,59 @@ app.get('/api/requests', (req, res) => {
 
     db.query(
 
-        `SELECT * FROM
-        connection_requests
-        WHERE status='pending'`,
+        `
+        SELECT
+            cr.*,
+            COALESCE(r.device_limit, 0) AS device_limit,
+            COALESCE(ac.current_connections, 0) AS current_connections,
+            n.rssi,
+            n.signal_quality,
+            n.node_status,
+            nm.wifi_latency_ms,
+            nm.wifi_jitter_ms,
+            nm.wifi_packet_loss,
+            nm.wifi_success_rate
+        FROM connection_requests cr
+        LEFT JOIN rooms r
+            ON r.id = cr.room_id
+        LEFT JOIN (
+            SELECT
+                room_id,
+                COUNT(*) AS current_connections
+            FROM active_sessions
+            WHERE status = 'connected'
+            GROUP BY room_id
+        ) ac
+            ON ac.room_id = cr.room_id
+        LEFT JOIN (
+            SELECT
+                room_id,
+                rssi,
+                signal_quality,
+                CASE
+                    WHEN TIMESTAMPDIFF(SECOND, last_seen, NOW()) > 30
+                    THEN 'offline'
+                    ELSE 'online'
+                END AS node_status
+            FROM nodes
+        ) n
+            ON n.room_id = cr.room_id
+        LEFT JOIN (
+            SELECT
+                room_id,
+                ROUND(AVG(wifi_latency_ms), 1) AS wifi_latency_ms,
+                ROUND(AVG(wifi_jitter_ms), 1) AS wifi_jitter_ms,
+                ROUND(AVG(wifi_packet_loss), 1) AS wifi_packet_loss,
+                ROUND(AVG(wifi_success_rate), 1) AS wifi_success_rate
+            FROM node_metrics
+            WHERE created_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)
+              AND wifi_latency_ms IS NOT NULL
+            GROUP BY room_id
+        ) nm
+            ON nm.room_id = cr.room_id
+        WHERE cr.status = 'pending'
+        ORDER BY cr.created_at DESC
+        `,
 
         (err, results) => {
 
@@ -2150,7 +2322,13 @@ app.get('/api/traffic', (req, res) => {
 
             }
 
-            res.json(results);
+            res.json(
+                results.map((request) => ({
+                    ...request,
+                    ai_suggestion:
+                        buildAdditionalConnectionSuggestion(request)
+                }))
+            );
 
         }
 
